@@ -1,28 +1,28 @@
 # 📁 Komawan - File Management SaaS (Frontend)
 
-Selamat datang di *repository* Frontend untuk **Komawan**, sebuah aplikasi manajemen file berbasis Software as a Service (SaaS). 
+Welcome to the Frontend repository for **Komawan**, a modern Software as a Service (SaaS) file management application.
 
-Aplikasi ini dibangun menggunakan **React** dan didesain untuk memberikan pengalaman pengguna yang cepat, responsif, dan aman dalam mengelola file layaknya Google Drive.
+This application is built with **React** and designed to provide a fast, responsive, and secure user experience for managing files, similar to Google Drive.
 
-## ✨ Fitur Utama
+## ✨ Key Features
 
-- **Secure File Storage**: Upload, download, dan manajemen file dengan aman.
-- **Role-Based Access Control**: Manajemen limitasi dan kuota otomatis berdasarkan *role* pengguna (Free vs Pro).
-- **Modern User Interface**: Antarmuka yang bersih dan interaktif untuk pengalaman manajemen file terbaik.
-- **Supabase Integration**: Terintegrasi penuh dengan Supabase Storage untuk penyimpanan file tingkat lanjut, dikawal dengan Row Level Security (RLS).
-- **Real-time Sync**: Sinkronisasi state yang aman antara Frontend, Supabase, dan Laravel Backend.
+- **Secure File Storage**: Safely upload, download, and manage your files.
+- **Role-Based Access Control**: Automated quota and limitation management based on user roles (Free vs Pro).
+- **Modern User Interface**: A clean, interactive interface for the best file management experience.
+- **Supabase Integration**: Fully integrated with Supabase Storage for advanced file storage, secured by Row Level Security (RLS).
+- **Real-time Sync**: Secure state synchronization across the Frontend, Supabase, and Laravel Backend.
 
-## 🚀 Teknologi yang Digunakan
+## 🚀 Tech Stack
 
 - **Framework**: React.js
 - **Styling**: Vanilla CSS / Modern UI
 - **Storage & RLS**: Supabase
-- **HTTP Client**: Axios (terkoneksi ke Laravel API)
+- **HTTP Client**: Axios (connected to Laravel API)
 - **State Management**: React Hooks
 
-## 🛠️ Cara Menjalankan di Lokal (Development)
+## 🛠️ Local Development Setup
 
-1. **Clone Repository ini**
+1. **Clone the Repository**
    ```bash
    git clone https://github.com/baihaqii08/Komawan-FE.git
    cd Komawan-FE
@@ -33,26 +33,26 @@ Aplikasi ini dibangun menggunakan **React** dan didesain untuk memberikan pengal
    npm install
    ```
 
-3. **Konfigurasi Environment Variables**
-   Buat file `.env` di folder utama aplikasi dan isi dengan kredensial Supabase dan API Backend kamu:
+3. **Configure Environment Variables**
+   Create a `.env` file in the root directory and populate it with your Supabase and Backend API credentials:
    ```env
    REACT_APP_SUPABASE_URL=https://[PROJECT-ID].supabase.co
-   REACT_APP_SUPABASE_ANON_KEY=[ANON-KEY-KAMU]
+   REACT_APP_SUPABASE_ANON_KEY=[YOUR-ANON-KEY]
    REACT_APP_API_URL=http://localhost:8000/api/v1
    ```
 
-4. **Jalankan Aplikasi**
+4. **Run the Application**
    ```bash
    npm start
    ```
-   Aplikasi akan terbuka otomatis di `http://localhost:3000`.
+   The application will automatically open at `http://localhost:3000`.
 
 ## 📦 Deployment
 
-Aplikasi ini siap untuk di-deploy ke berbagai platform modern seperti **Vercel**, **Netlify**, atau **Cloudflare Pages** cukup dengan menggunakan perintah build standar:
+This application is ready to be deployed to modern platforms like **Vercel**, **Netlify**, or **Cloudflare Pages** using the standard build command:
 ```bash
 npm run build
 ```
 
 ---
-*Dibuat untuk keperluan responsi dan demonstrasi manajemen file berbasis SaaS.*
+*Developed for SaaS file management demonstration and evaluation purposes.*
