@@ -1,6 +1,6 @@
-# 📁 Komawan - File Management SaaS (Frontend)
+# 📁 Cloud Computing - File Management SaaS (Frontend)
 
-Welcome to the Frontend repository for **Komawan**, a modern Software as a Service (SaaS) file management application.
+Welcome to the Frontend repository for **Cloud Computing**, a modern Software as a Service (SaaS) file management application.
 
 This application is built with **React** and designed to provide a fast, responsive, and secure user experience for managing files, similar to Google Drive.
 
