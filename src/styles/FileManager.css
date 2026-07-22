@@ -1,0 +1,178 @@
+:root {
+  --bg: linear-gradient(180deg,#7EB6E3 0%,#BFDCEC 40%,#EFE4D4 80%,#F3E9DC 100%);
+  --bgSolid: #F3E9DC;
+  --bgCard: rgba(255,255,255,0.6);
+  --bgCardHover: rgba(255,255,255,0.8);
+  --bgCardSolid: #FFFFFF;
+  --border: rgba(22,35,63,0.12);
+  --borderStrong: rgba(22,35,63,0.25);
+  --primary: #16233F;
+  --accent: #E8834D;
+  --accentHover: #D9723B;
+  --accentGlow: rgba(232,131,77,0.25);
+  --gradient: linear-gradient(135deg,#16233F,#2A3B5C);
+  --text: #16233F;
+  --textMuted: rgba(22,35,63,0.45);
+  --textSub: rgba(22,35,63,0.65);
+  --primaryGlow: rgba(22,35,63,0.25);
+  --gradientOrange: linear-gradient(135deg,#E8834D,#D9723B);
+  --gradientBlue: linear-gradient(135deg,#2E5C8A,#1B3B5C);
+  --gradientGreen: linear-gradient(135deg,#3B7A57,#234C36);
+  --gradientGold: linear-gradient(135deg,#B8862E,#8C6622);
+  --red: #C4453A;
+  --redBg: rgba(196,69,58,0.1);
+  --green: #3B7A57;
+  --greenBg: rgba(59,122,87,0.1);
+  --blue: #2E5C8A;
+  --blueBg: rgba(46,92,138,0.1);
+  --gold: #B8862E;
+  --goldBg: rgba(184,134,46,0.1);
+  --orange: #E8834D;
+  --orangeBg: rgba(232,131,77,0.1);
+  --yellow: #D4A32C;
+  --yellowBg: rgba(212,163,44,0.1);
+  --pink: #D55A88;
+  --pinkBg: rgba(213,90,136,0.1);
+}
+
+.fm-container {
+  min-height: 100vh;
+  background: var(--bg);
+  font-family: Arial, sans-serif;
+  position: relative;
+  overflow-x: hidden;
+}
+
+.fm-navbar {
+  background: rgba(255, 255, 255, 0.7);
+  backdrop-filter: blur(20px);
+  border-bottom: 1px solid var(--border);
+  position: sticky;
+  top: 0;
+  z-index: 200;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 10px;
+}
+
+.fm-navbar-mobile { padding: 10px 14px; }
+.fm-navbar-desktop { padding: 13px 28px; }
+
+.fm-logo-container {
+  display: flex;
+  align-items: center;
+  min-width: 0;
+}
+
+.fm-logo-icon {
+  flex-shrink: 0;
+  background: var(--primary);
+  border-radius: 10px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--bgSolid);
+  cursor: pointer;
+}
+.fm-logo-icon-mobile { width: 32px; height: 32px; font-size: 14px; }
+.fm-logo-icon-desktop { width: 36px; height: 36px; font-size: 16px; }
+
+.fm-logo-text {
+  margin: 0;
+  font-weight: 700;
+  letter-spacing: -0.01em;
+  color: var(--text);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.fm-logo-text-mobile { font-size: 14px; }
+.fm-logo-text-desktop { font-size: 16px; }
+
+.fm-logo-subtext {
+  margin: 0;
+  font-size: 11px;
+  color: var(--textMuted);
+}
+
+.fm-nav-actions {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-shrink: 0;
+}
+
+.fm-btn-danger {
+  background: var(--redBg);
+  color: var(--red);
+  border-radius: 100px;
+  border: 1px solid rgba(196, 69, 58, 0.2);
+  font-weight: 600;
+  cursor: pointer;
+  font-family: inherit;
+  white-space: nowrap;
+}
+.fm-btn-danger-mobile { padding: 7px 10px; font-size: 12px; }
+.fm-btn-danger-desktop { padding: 8px 16px; font-size: 13px; }
+
+.fm-profile-btn {
+  display: flex;
+  align-items: center;
+  border-radius: 100px;
+  cursor: pointer;
+}
+.fm-profile-btn-mobile { gap: 6px; padding: 6px 8px; }
+.fm-profile-btn-desktop { gap: 10px; padding: 6px 14px 6px 6px; }
+
+.fm-avatar {
+  border-radius: 50%;
+  flex-shrink: 0;
+  background: var(--accent);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 13px;
+  font-weight: 700;
+  color: #fff;
+}
+.fm-avatar-mobile { width: 26px; height: 26px; }
+.fm-avatar-desktop { width: 30px; height: 30px; }
+
+.fm-content-wrapper {
+  max-width: 1200px;
+  position: relative;
+  z-index: 1;
+  box-sizing: border-box;
+}
+.fm-content-wrapper-mobile { margin: 16px auto; padding: 0 14px; }
+.fm-content-wrapper-desktop { margin: 26px auto; padding: 0 24px; }
+
+.fm-stat-grid {
+  display: grid;
+}
+.fm-stat-grid-mobile { grid-template-columns: repeat(2, 1fr); gap: 10px; margin-bottom: 16px; }
+.fm-stat-grid-desktop { grid-template-columns: repeat(4, 1fr); gap: 16px; margin-bottom: 24px; }
+
+.fm-main-layout {
+  display: grid;
+}
+.fm-main-layout-mobile { grid-template-columns: 1fr; gap: 16px; }
+.fm-main-layout-desktop { grid-template-columns: 210px 1fr; gap: 22px; }
+
+.fm-sidebar {
+  display: flex;
+}
+.fm-sidebar-mobile { flex-direction: row; flex-wrap: wrap; gap: 14px; }
+.fm-sidebar-desktop { flex-direction: column; flex-wrap: nowrap; gap: 14px; }
+
+.fm-card {
+  background: var(--bgCard);
+  backdrop-filter: blur(20px);
+  border: 1px solid var(--border);
+  border-radius: 20px;
+  box-sizing: border-box;
+}
+.fm-card-mobile { flex: 1 1 260px; }
+
+/* ... More styles will be added if needed, this focuses on the major layout ... */
