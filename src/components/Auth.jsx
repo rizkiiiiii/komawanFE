@@ -23,6 +23,7 @@ export default function Auth({ onBackToLanding }) {
   const [password, setPassword]     = useState('')
   const [name, setName]             = useState('')
   const [otp, setOtp]               = useState('')
+  const [otpContext, setOtpContext] = useState('register') // 'register' | 'login'
   const [loading, setLoading]       = useState(false)
   const [message, setMessage]       = useState('')
   const [showPass, setShowPass]     = useState(false)
@@ -39,6 +40,17 @@ export default function Auth({ onBackToLanding }) {
   const isLogin = mode === 'login'
   const isError = message && !message.toLowerCase().includes('berhasil') && !message.toLowerCase().includes('dikirim') && !message.toLowerCase().includes('diverifikasi')
 
+  async function finishSupabaseLogin() {
+    const { data: sbData, error: sbError } = await supabase.auth.signInWithPassword({ email, password })
+    if (sbError) {
+      localStorage.removeItem('token'); localStorage.removeItem('roles')
+      throw new Error('Akun belum sinkron dengan storage: ' + sbError.message)
+    }
+    if (sbData?.user?.id) {
+      try { await api.post('/auth/sync-supabase-uid', { supabase_uid: sbData.user.id }) } catch (_) {}
+    }
+  }
+
   async function handleSubmit() {
     if (!email.trim() || !password.trim()) { setMessage('Lengkapi semua kolom.'); return }
     if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) { setMessage('Format email tidak valid.'); return }
@@ -47,13 +59,22 @@ export default function Auth({ onBackToLanding }) {
     try {
       if (mode === 'login') {
         const laravelRes = await api.post('/auth/login', { email, password })
-        const { token, user: laravelUser } = laravelRes.data.data
-        localStorage.setItem('token', token)
-        localStorage.setItem('roles', JSON.stringify(laravelUser.roles?.map(r => r.name) || []))
-        const { error: sbError } = await supabase.auth.signInWithPassword({ email, password })
-        if (sbError) {
-          localStorage.removeItem('token'); localStorage.removeItem('roles')
-          throw new Error('Akun belum sinkron dengan storage: ' + sbError.message)
+        const result = laravelRes.data.data
+        if (result?.requires_otp) {
+          setOtpContext('login')
+          setMessage(result.message || 'Kode OTP verifikasi login telah dikirim ke email kamu.')
+          setMode('otp')
+        } else {
+          // fallback in case backend ever returns token/user directly without OTP
+          const { token, user: laravelUser } = result || {}
+          if (token && laravelUser) {
+            localStorage.setItem('token', token)
+            localStorage.setItem('roles', JSON.stringify(laravelUser.roles?.map(r => r.name) || []))
+            await finishSupabaseLogin()
+            setMode('login')
+          } else {
+            throw new Error('Respons login tidak dikenali.')
+          }
         }
       } else {
         await api.post('/auth/register', { name: name || email.split('@')[0], email, password, password_confirmation: password })
@@ -67,6 +88,7 @@ export default function Auth({ onBackToLanding }) {
         await supabase.auth.signOut()
         localStorage.removeItem('token'); localStorage.removeItem('roles'); localStorage.removeItem('suppress_auth_event')
         setMessage('Kode verifikasi telah dikirim ke email kamu.')
+        setOtpContext('register')
         setMode('otp')
       }
     } catch (err) {
@@ -78,11 +100,24 @@ export default function Auth({ onBackToLanding }) {
     if (!otp.trim() || otp.trim().length !== 6) { setMessage('Masukkan 6 digit kode.'); return }
     setLoading(true); setMessage('')
     try {
-      await api.post('/auth/verify-otp', { email, otp: otp.trim() })
-      setMessage('Email berhasil diverifikasi. Silakan masuk.')
-      setOtp(''); setMode('login')
+      const res = await api.post('/auth/verify-otp', { email, otp: otp.trim() })
+      const { token, user: laravelUser } = res.data.data || {}
+
+      if (otpContext === 'login') {
+        // Verifikasi OTP setelah login: backend selalu balikin token+user di sini
+        if (!token || !laravelUser) throw new Error('Verifikasi berhasil tapi sesi tidak diterima. Coba login ulang.')
+        localStorage.setItem('token', token)
+        localStorage.setItem('roles', JSON.stringify(laravelUser.roles?.map(r => r.name) || []))
+        await finishSupabaseLogin()
+        setOtp('')
+        // Berhasil login penuh — App.js akan pick up via supabase.auth.onAuthStateChange / token di localStorage
+      } else {
+        // Verifikasi OTP setelah register: cuma tandai email terverifikasi, minta user login manual
+        setMessage('Email berhasil diverifikasi. Silakan masuk.')
+        setOtp(''); setMode('login')
+      }
     } catch (err) {
-      setMessage(err.response?.data?.message || 'Kode salah atau kadaluarsa.')
+      setMessage(err.response?.data?.message || err.message || 'Kode salah atau kadaluarsa.')
     } finally { setLoading(false) }
   }
 

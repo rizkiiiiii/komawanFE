@@ -1,9 +1,8 @@
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useRef } from 'react'
 import { motion, AnimatePresence } from 'framer-motion'
 import { T } from '../../theme'
 import api from '../../api'
 import { formatSize, formatName, getInitials } from '../../utils'
-import useIsMobile from '../../hooks/useIsMobile'
 import Toast from '../Toast'
 
 const TABS = [
@@ -21,6 +20,13 @@ export default function AdminDashboard({ user, onBack }) {
   const [files, setFiles] = useState([])
   const [logs, setLogs]   = useState([])
   const [toast, setToast] = useState({ msg:'', type:'success' })
+  const [suspendModal, setSuspendModal] = useState(null)
+  const [suspendHours, setSuspendHours] = useState(1)
+  const [suspendLoading, setSuspendLoading] = useState(false)
+  const [showCreateAdmin, setShowCreateAdmin] = useState(false)
+  const [adminForm, setAdminForm] = useState({ name: '', email: '', password: '' })
+  const [adminLoading, setAdminLoading] = useState(false)
+  const accessRevokedRef = useRef(false) // cegah loop kalau 403 kepanggil berkali-kali
 
   function showToast(msg, type='success') {
     setToast({ msg, type })
@@ -30,7 +36,6 @@ export default function AdminDashboard({ user, onBack }) {
   // Ambil roles dari localStorage yang diset saat login Laravel
   const roles = JSON.parse(localStorage.getItem('roles') || '[]')
   const isSuperAdmin = roles.includes('SUPER_ADMIN')
-  const isAdminRole = roles.includes('ADMIN')
 
   useEffect(() => {
     fetchData(activeTab)
@@ -53,7 +58,20 @@ export default function AdminDashboard({ user, onBack }) {
         setLogs(res.data.data)
       }
     } catch (err) {
-      console.error(err)
+      if (err.response?.status === 403) {
+        // Role user ini sudah dicabut/diturunkan oleh Super Admin (mis. demote/ban/suspend),
+        // tapi sesi lama di browser masih nyimpen role admin di localStorage.
+        if (accessRevokedRef.current) return // sudah pernah ditangani, jangan ulang lagi
+        accessRevokedRef.current = true
+        localStorage.removeItem('token')
+        localStorage.removeItem('roles')
+        alert('Akses admin kamu sudah dicabut. Silakan login ulang.')
+        window.location.href = '/' // hard redirect, buang seluruh state React lama
+        return
+      } else {
+        console.error(err)
+        showToast('Gagal memuat data: ' + (err.response?.data?.message || err.message), 'error')
+      }
     } finally {
       setLoading(false)
     }
@@ -65,7 +83,7 @@ export default function AdminDashboard({ user, onBack }) {
       await api.put(`/users/${userId}/ban`)
       showToast('Pengguna diblokir permanen', 'success')
       fetchData('users')
-    } catch (err) { showToast('Gagal memblokir: ' + err.message, 'error') }
+    } catch (err) { showToast('Gagal memblokir: ' + (err.response?.data?.message || err.message), 'error') }
   }
 
   async function handleUnban(userId) {
@@ -73,17 +91,30 @@ export default function AdminDashboard({ user, onBack }) {
       await api.put(`/users/${userId}/unban`)
       showToast('Blokir dibuka', 'success')
       fetchData('users')
-    } catch (err) { showToast('Gagal membuka blokir: ' + err.message, 'error') }
+    } catch (err) { showToast('Gagal membuka blokir: ' + (err.response?.data?.message || err.message), 'error') }
   }
 
-  async function handleSuspend(userId) {
-    const hours = prompt('Berapa jam ingin menangguhkan (suspend) pengguna ini? (1-12)')
-    if (!hours) return
+  function handleOpenSuspendModal(userObj) {
+    setSuspendModal(userObj)
+    setSuspendHours(1)
+  }
+
+  async function handleConfirmSuspend(e) {
+    e.preventDefault()
+    if (!suspendModal) return
+    const hoursNum = parseInt(suspendHours)
+    if (isNaN(hoursNum) || hoursNum < 1 || hoursNum > 12) {
+      showToast('Durasi penangguhan harus antara 1-12 jam', 'error')
+      return
+    }
+    setSuspendLoading(true)
     try {
-      await api.put(`/users/${userId}/suspend`, { hours: parseInt(hours) })
-      showToast(`Pengguna ditangguhkan selama ${hours} jam`, 'success')
+      await api.put(`/users/${suspendModal.id}/suspend`, { hours: hoursNum })
+      showToast(`Pengguna ditangguhkan selama ${hoursNum} jam`, 'success')
+      setSuspendModal(null)
       fetchData('users')
-    } catch (err) { showToast('Gagal menangguhkan: ' + err.message, 'error') }
+    } catch (err) { showToast('Gagal menangguhkan: ' + (err.response?.data?.message || err.message), 'error') }
+    finally { setSuspendLoading(false) }
   }
 
   async function handleUnsuspend(userId) {
@@ -91,7 +122,49 @@ export default function AdminDashboard({ user, onBack }) {
       await api.put(`/users/${userId}/unsuspend`)
       showToast('Penangguhan dicabut', 'success')
       fetchData('users')
-    } catch (err) { showToast('Gagal membuka penangguhan: ' + err.message, 'error') }
+    } catch (err) { showToast('Gagal membuka penangguhan: ' + (err.response?.data?.message || err.message), 'error') }
+  }
+
+  async function handlePromoteAdmin(userId, userName) {
+    if (!window.confirm(`Yakin ingin mempromosikan "${userName}" menjadi Admin?`)) return
+    try {
+      const res = await api.put(`/users/${userId}/promote-admin`)
+      showToast(res.data.message || 'Berhasil dijadikan Admin! ⭐', 'success')
+      fetchData('users')
+    } catch (err) { showToast('Gagal mempromosikan admin: ' + (err.response?.data?.message || err.message), 'error') }
+  }
+
+  async function handleDemoteUser(userId, userName) {
+    if (!window.confirm(`Yakin ingin mengembalikan peran "${userName}" menjadi User biasa?`)) return
+    try {
+      const res = await api.put(`/users/${userId}/demote-user`)
+      showToast(res.data.message || 'Peran dikembalikan ke User 👤', 'info')
+      fetchData('users')
+    } catch (err) { showToast('Gagal mengubah peran: ' + (err.response?.data?.message || err.message), 'error') }
+  }
+
+  async function handleCreateAdmin(e) {
+    e.preventDefault()
+    if (!adminForm.name.trim() || !adminForm.email.trim() || !adminForm.password.trim()) {
+      showToast('Mohon lengkapi semua kolom!', 'error')
+      return
+    }
+    if (adminForm.password.length < 6) {
+      showToast('Password minimal 6 karakter!', 'error')
+      return
+    }
+    setAdminLoading(true)
+    try {
+      await api.post('/admin/create-admin', adminForm)
+      showToast('Akun Admin berhasil dibuat! 🎉', 'success')
+      setShowCreateAdmin(false)
+      setAdminForm({ name: '', email: '', password: '' })
+      fetchData('users')
+    } catch (err) {
+      showToast('Gagal membuat admin: ' + (err.response?.data?.message || err.message), 'error')
+    } finally {
+      setAdminLoading(false)
+    }
   }
 
   const statCards = [
@@ -192,6 +265,24 @@ export default function AdminDashboard({ user, onBack }) {
               <motion.div key="users" initial={{opacity:0,x:20}} animate={{opacity:1,x:0}} exit={{opacity:0,x:-20}}
                 style={{background:T.bgCard,borderRadius:24,border:`1px solid ${T.border}`,overflow:'hidden',
                   boxShadow:'0 20px 50px rgba(0,0,0,0.05)'}}>
+                
+                {/* Header dengan tombol + Buat Admin */}
+                <div style={{display:'flex',justifyContent:'space-between',alignItems:'center',padding:'20px 24px',borderBottom:`1px solid ${T.border}`}}>
+                  <div>
+                    <h3 style={{margin:0,fontSize:16,fontWeight:800,color:T.text}}>Daftar Pengguna</h3>
+                    <p style={{margin:'2px 0 0',fontSize:12,color:T.textMuted}}>Kelola akun pengguna, peran, dan penangguhan akses</p>
+                  </div>
+                  {isSuperAdmin && (
+                    <motion.button whileHover={{scale:1.04}} whileTap={{scale:0.96}}
+                      onClick={() => setShowCreateAdmin(true)}
+                      style={{padding:'10px 18px',borderRadius:12,background:T.gradientGold,
+                        color:'#fff',border:'none',fontSize:13,fontWeight:700,cursor:'pointer',
+                        boxShadow:'0 4px 14px rgba(184,134,46,0.3)',display:'flex',alignItems:'center',gap:6}}>
+                      <span>+</span> Buat Admin Baru
+                    </motion.button>
+                  )}
+                </div>
+
                 <div style={{overflowX:'auto'}}>
                   <table style={{width:'100%',borderCollapse:'collapse',textAlign:'left'}}>
                     <thead>
@@ -243,11 +334,26 @@ export default function AdminDashboard({ user, onBack }) {
                                   {u.status.toUpperCase()}
                                 </span>
                               </div>
+                              {u.status === 'suspended' && u.suspended_until && (
+                                <div style={{fontSize:10,color:T.yellow,marginTop:3}}>
+                                  s/d {new Date(u.suspended_until).toLocaleString('id-ID', { dateStyle: 'short', timeStyle: 'short' })}
+                                </div>
+                              )}
                             </td>
                             <td style={{padding:'16px 20px',textAlign:'right'}}>
                               <div style={{display:'flex',justifyContent:'flex-end',gap:8}}>
                                 {!isSA && (
                                   <>
+                                    {/* Super Admin Role Control Buttons */}
+                                    {isSuperAdmin && (
+                                      !isA ? (
+                                        <motion.button whileHover={{scale:1.05}} whileTap={{scale:0.95}} onClick={() => handlePromoteAdmin(u.id, u.name || u.email)}
+                                          style={{background:T.orangeBg,color:T.orange,border:`1px solid rgba(234,179,8,0.3)`,padding:'6px 12px',borderRadius:8,cursor:'pointer',fontSize:12,fontWeight:700}}>⭐ Make Admin</motion.button>
+                                      ) : (
+                                        <motion.button whileHover={{scale:1.05}} whileTap={{scale:0.95}} onClick={() => handleDemoteUser(u.id, u.name || u.email)}
+                                          style={{background:T.bgSolid,color:T.textSub,border:`1px solid ${T.border}`,padding:'6px 12px',borderRadius:8,cursor:'pointer',fontSize:12,fontWeight:600}}>👤 Demote User</motion.button>
+                                      )
+                                    )}
                                     {isSuperAdmin && (
                                       u.status !== 'banned' ? (
                                         <motion.button whileHover={{scale:1.05}} whileTap={{scale:0.95}} onClick={() => handleBan(u.id)}
@@ -260,7 +366,7 @@ export default function AdminDashboard({ user, onBack }) {
                                     {(!isA || isSuperAdmin) && (
                                       <>
                                         {u.status !== 'suspended' && u.status !== 'banned' && (
-                                          <motion.button whileHover={{scale:1.05}} whileTap={{scale:0.95}} onClick={() => handleSuspend(u.id)}
+                                          <motion.button whileHover={{scale:1.05}} whileTap={{scale:0.95}} onClick={() => handleOpenSuspendModal(u)}
                                             style={{background:T.yellowBg,color:T.yellow,border:`1px solid rgba(212,163,44,0.2)`,padding:'6px 12px',borderRadius:8,cursor:'pointer',fontSize:12,fontWeight:600}}>Suspend</motion.button>
                                         )}
                                         {u.status === 'suspended' && (
@@ -402,6 +508,131 @@ export default function AdminDashboard({ user, onBack }) {
         </div>
       </div>
       
+      {/* MODAL SUSPEND (DURASI 1 - 12 JAM) */}
+      <AnimatePresence>
+        {suspendModal && (
+          <motion.div initial={{opacity:0}} animate={{opacity:1}} exit={{opacity:0}}
+            style={{position:'fixed',inset:0,background:'rgba(0,0,0,0.65)',backdropFilter:'blur(12px)',
+              display:'flex',alignItems:'center',justifyContent:'center',zIndex:2000,padding:20}}
+            onClick={() => setSuspendModal(null)}>
+            <motion.div initial={{scale:0.92,y:15}} animate={{scale:1,y:0}} exit={{scale:0.92,y:15}}
+              onClick={e => e.stopPropagation()}
+              style={{background:T.bgCard,border:`1px solid ${T.borderStrong}`,borderRadius:24,
+                padding:28,width:'100%',maxWidth:400,boxShadow:'0 24px 60px rgba(0,0,0,0.3)'}}>
+              
+              <div style={{display:'flex',alignItems:'center',gap:12,marginBottom:18}}>
+                <div style={{width:44,height:44,borderRadius:14,background:T.yellowBg,
+                  border:`1px solid ${T.yellow}44`,display:'flex',alignItems:'center',
+                  justifyContent:'center',fontSize:22}}>
+                  ⏳
+                </div>
+                <div>
+                  <h3 style={{margin:0,fontSize:17,fontWeight:800,color:T.text}}>Suspend Pengguna</h3>
+                  <p style={{margin:'2px 0 0',fontSize:12,color:T.textMuted,overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap',maxWidth:260}}>
+                    {suspendModal.email}
+                  </p>
+                </div>
+              </div>
+
+              <form onSubmit={handleConfirmSuspend}>
+                <div style={{marginBottom:18}}>
+                  <label style={{display:'block',marginBottom:8,fontSize:12,fontWeight:700,color:T.textSub}}>
+                    Durasi Penangguhan (1 - 12 Jam):
+                  </label>
+                  <input type="number" min="1" max="12" required
+                    value={suspendHours} onChange={e => setSuspendHours(e.target.value)}
+                    style={{width:'100%',boxSizing:'border-box',padding:'12px 14px',borderRadius:12,
+                      background:T.bgSolid,border:`1px solid ${T.borderStrong}`,color:T.text,
+                      fontSize:15,fontWeight:700,outline:'none'}} />
+                </div>
+
+                <div style={{display:'flex',gap:10}}>
+                  <button type="button" onClick={() => setSuspendModal(null)}
+                    style={{flex:1,padding:'12px',borderRadius:12,background:'transparent',
+                      color:T.text,border:`1px solid ${T.border}`,cursor:'pointer',fontSize:13,fontWeight:600}}>
+                    Batal
+                  </button>
+                  <button type="submit" disabled={suspendLoading}
+                    style={{flex:1,padding:'12px',borderRadius:12,background:T.yellowBg,
+                      color:T.yellow,border:`1px solid ${T.yellow}44`,cursor:'pointer',fontSize:13,fontWeight:700}}>
+                    {suspendLoading ? 'Menangguhkan...' : 'Konfirmasi Suspend'}
+                  </button>
+                </div>
+              </form>
+            </motion.div>
+          </motion.div>
+        )}
+      </AnimatePresence>
+
+      {/* MODAL CREATE ADMIN BARU */}
+      <AnimatePresence>
+        {showCreateAdmin && (
+          <motion.div initial={{opacity:0}} animate={{opacity:1}} exit={{opacity:0}}
+            style={{position:'fixed',inset:0,background:'rgba(0,0,0,0.65)',backdropFilter:'blur(12px)',
+              display:'flex',alignItems:'center',justifyContent:'center',zIndex:2000,padding:20}}
+            onClick={() => setShowCreateAdmin(false)}>
+            <motion.form initial={{scale:0.92,y:15}} animate={{scale:1,y:0}} exit={{scale:0.92,y:15}}
+              onSubmit={handleCreateAdmin} onClick={e => e.stopPropagation()}
+              style={{background:T.bgCard,border:`1px solid ${T.borderStrong}`,borderRadius:24,
+                padding:28,width:'100%',maxWidth:420,boxShadow:'0 24px 60px rgba(0,0,0,0.3)'}}>
+              
+              <div style={{display:'flex',alignItems:'center',gap:12,marginBottom:20}}>
+                <div style={{width:44,height:44,borderRadius:14,background:T.orangeBg,
+                  border:`1px solid ${T.orange}44`,display:'flex',alignItems:'center',
+                  justifyContent:'center',fontSize:22}}>
+                  👑
+                </div>
+                <div>
+                  <h3 style={{margin:0,fontSize:18,fontWeight:800,color:T.text}}>Buat Akun Admin Baru</h3>
+                  <p style={{margin:'2px 0 0',fontSize:12,color:T.textMuted}}>Daftarkan Admin dengan hak akses sistem</p>
+                </div>
+              </div>
+
+              <div style={{marginBottom:14}}>
+                <label style={{display:'block',marginBottom:6,fontSize:12,fontWeight:700,color:T.textSub}}>Nama Lengkap</label>
+                <input type="text" required placeholder="Masukkan nama"
+                  value={adminForm.name} onChange={e => setAdminForm({...adminForm, name: e.target.value})}
+                  style={{width:'100%',boxSizing:'border-box',padding:'12px 14px',borderRadius:12,
+                    background:T.bgSolid,border:`1px solid ${T.borderStrong}`,color:T.text,
+                    fontSize:14,outline:'none'}} />
+              </div>
+
+              <div style={{marginBottom:14}}>
+                <label style={{display:'block',marginBottom:6,fontSize:12,fontWeight:700,color:T.textSub}}>Email Admin</label>
+                <input type="email" required placeholder="admin@domain.com"
+                  value={adminForm.email} onChange={e => setAdminForm({...adminForm, email: e.target.value})}
+                  style={{width:'100%',boxSizing:'border-box',padding:'12px 14px',borderRadius:12,
+                    background:T.bgSolid,border:`1px solid ${T.borderStrong}`,color:T.text,
+                    fontSize:14,outline:'none'}} />
+              </div>
+
+              <div style={{marginBottom:22}}>
+                <label style={{display:'block',marginBottom:6,fontSize:12,fontWeight:700,color:T.textSub}}>Password (Min. 6 Karakter)</label>
+                <input type="password" required minLength={6} placeholder="••••••••"
+                  value={adminForm.password} onChange={e => setAdminForm({...adminForm, password: e.target.value})}
+                  style={{width:'100%',boxSizing:'border-box',padding:'12px 14px',borderRadius:12,
+                    background:T.bgSolid,border:`1px solid ${T.borderStrong}`,color:T.text,
+                    fontSize:14,outline:'none'}} />
+              </div>
+
+              <div style={{display:'flex',gap:10}}>
+                <button type="button" onClick={() => setShowCreateAdmin(false)}
+                  style={{flex:1,padding:'12px',borderRadius:12,background:'transparent',
+                    color:T.text,border:`1px solid ${T.border}`,cursor:'pointer',fontSize:13,fontWeight:600}}>
+                  Batal
+                </button>
+                <button type="submit" disabled={adminLoading}
+                  style={{flex:1,padding:'12px',borderRadius:12,background:T.gradientGold,
+                    color:'#fff',border:'none',cursor:'pointer',fontSize:13,fontWeight:700,
+                    boxShadow:'0 4px 14px rgba(184,134,46,0.3)'}}>
+                  {adminLoading ? 'Memproses...' : 'Buat Admin'}
+                </button>
+              </div>
+            </motion.form>
+          </motion.div>
+        )}
+      </AnimatePresence>
+
       {/* Global CSS for Skeleton */}
       <style>{`
         .skeleton {

@@ -46,6 +46,7 @@ export default function FileManager({ user, onOpenAdmin }) {
   const [showProfile, setShowProfile] = useState(false)
   const [showUpgrade, setShowUpgrade] = useState(false)
   const [isPro, setIsPro]             = useState(false)
+  const [trashFilesCount, setTrashFilesCount] = useState(0)
   const [confirmState, setConfirmState] = useState(null)
   const [contextMenu, setContextMenu] = useState(null)
   const [isDragging, setIsDragging]   = useState(false)
@@ -106,13 +107,36 @@ export default function FileManager({ user, onOpenAdmin }) {
     return () => document.removeEventListener('mousedown', h)
   }, [])
 
+  async function loadTrashCount() {
+    try {
+      const res = await api.get('/files/trash')
+      setTrashFilesCount(res.data.data?.length || 0)
+    } catch (e) { console.warn(e) }
+  }
+
   async function loadFiles() {
     try {
-      const { data, error } = await supabase.storage.from('files')
-        .list(basePath(), { sortBy: { column: sortBy === 'date' ? 'created_at' : 'name', order: 'desc' } })
-      if (error) throw error
-      setFiles(data.filter(f => f.name !== '.emptyFolderPlaceholder'))
-    } catch (e) { showToast('Gagal memuat file: ' + e.message, 'error') }
+      const url = currentFolder === 'trash' ? '/files/trash' : '/files'
+      const res = await api.get(url, { params: { folder_id: currentFolder } })
+      if (res.data && res.data.data) {
+        const mapped = res.data.data.map(f => ({
+          id: f.id,
+          name: f.filename,
+          original_name: f.original_name,
+          size: f.size,
+          metadata: { size: f.size },
+          created_at: f.deleted_at || f.created_at,
+          is_trashed: currentFolder === 'trash',
+          storage_path: f.storage_path
+        }))
+        setFiles(mapped)
+        if (currentFolder === 'trash') {
+          setTrashFilesCount(mapped.length)
+        } else {
+          loadTrashCount()
+        }
+      }
+    } catch (e) { showToast('Gagal memuat file', 'error') }
   }
 
   async function loadFolders() {
@@ -176,8 +200,11 @@ export default function FileManager({ user, onOpenAdmin }) {
       if (error) throw error
       try {
         await api.post('/files/sync', { filename: actualFilename, original_name: file.name, size: file.size, storage_path: storagePath, folder_id: currentFolder })
-      } catch (syncErr) { console.warn('Backend sync gagal:', syncErr) }
-      if (settings.notifyUpload) showToast('File berhasil diupload! 🎉')
+        if (settings.notifyUpload) showToast('File berhasil diupload! 🎉')
+      } catch (syncErr) { 
+        console.warn('Backend sync gagal:', syncErr) 
+        showToast('Sync gagal: ' + (syncErr.response?.data?.message || syncErr.message), 'error')
+      }
       loadFiles()
     } catch (e) { showToast('Upload gagal: ' + e.message, 'error') }
     finally { clearInterval(iv); setProgress(100); setTimeout(() => { setUploading(false); setProgress(0) }, 600) }
@@ -226,31 +253,86 @@ export default function FileManager({ user, onOpenAdmin }) {
   }
 
   function handleDelete(fileName) {
-    askConfirmDelete(`Hapus "${formatName(fileName)}"?`, async () => {
+    const fileObj = files.find(f => f.name === fileName)
+    if (!fileObj) return
+
+    const isTrashed = currentFolder === 'trash'
+    const confirmMsg = isTrashed
+      ? `Hapus "${formatName(fileName)}" secara PERMANEN? File tidak akan bisa dipulihkan.`
+      : `Pindahkan "${formatName(fileName)}" ke Tong Sampah?`
+
+    askConfirmDelete(confirmMsg, async () => {
       try {
-        const path = `${basePath()}/${fileName}`
-        const { data, error } = await supabase.storage.from('files').remove([path])
-        if (error) throw error
-        if (data && data.length === 0) throw new Error("Akses ditolak oleh Policy Supabase (RLS). Cek SQL Dashboard.")
-        try { await api.post('/files/sync-delete', { paths: [path] }) } catch (e) { console.warn(e) }
-        showToast('File dihapus! 🗑️')
+        if (isTrashed) {
+          // Permanent delete from Supabase storage
+          const path = fileObj.storage_path || `${basePath()}/${fileName}`
+          const { error } = await supabase.storage.from('files').remove([path])
+          if (error) throw error
+          // Permanent delete from Laravel database
+          await api.delete(`/files/${fileObj.id}/force`)
+          showToast('File terhapus permanen! 🗑️', 'info')
+        } else {
+          // Soft delete from database (Supabase storage kept intact for recovery)
+          await api.delete(`/files/${fileObj.id}`)
+          showToast('File dipindahkan ke Tong Sampah 🗑️', 'success')
+        }
         setSelected(s => s.filter(f => f !== fileName))
         loadFiles()
-      } catch (e) { showToast('Gagal hapus: ' + e.message, 'error') }
+      } catch (e) { showToast('Gagal menghapus: ' + e.message, 'error') }
     })
   }
 
   function handleDeleteSelected() {
-    askConfirmDelete(`Hapus ${selected.length} file yang dipilih?`, async () => {
+    const isTrashed = currentFolder === 'trash'
+    const confirmMsg = isTrashed
+      ? `Hapus permanen ${selected.length} file yang dipilih?`
+      : `Pindahkan ${selected.length} file ke Tong Sampah?`
+
+    askConfirmDelete(confirmMsg, async () => {
       try {
-        const paths = selected.map(f => `${basePath()}/${f}`)
-        const { data, error } = await supabase.storage.from('files').remove(paths)
-        if (error) throw error
-        if (data && data.length === 0) throw new Error("Akses ditolak oleh Policy Supabase (RLS). Cek SQL Dashboard.")
-        try { await api.post('/files/sync-delete', { paths }) } catch (e) { console.warn(e) }
-        showToast(`${selected.length} file dihapus! 🗑️`)
+        const fileObjs = files.filter(f => selected.includes(f.name))
+        
+        if (isTrashed) {
+          const paths = fileObjs.map(f => f.storage_path)
+          const { error } = await supabase.storage.from('files').remove(paths)
+          if (error) throw error
+          await Promise.all(fileObjs.map(f => api.delete(`/files/${f.id}/force`)))
+          showToast(`${selected.length} file terhapus permanen! 🗑️`, 'info')
+        } else {
+          await Promise.all(fileObjs.map(f => api.delete(`/files/${f.id}`)))
+          showToast(`${selected.length} file dipindahkan ke Tong Sampah 🗑️`, 'success')
+        }
         setSelected([]); loadFiles()
-      } catch (e) { showToast('Gagal hapus: ' + e.message, 'error') }
+      } catch (e) { showToast('Gagal menghapus: ' + e.message, 'error') }
+    })
+  }
+
+  async function handleRestore(fileName) {
+    const fileObj = files.find(f => f.name === fileName)
+    if (!fileObj) return
+    try {
+      await api.put(`/files/${fileObj.id}/restore`)
+      showToast('File berhasil dipulihkan! ↺', 'success')
+      setSelected(s => s.filter(f => f !== fileName))
+      loadFiles()
+    } catch (e) { showToast('Gagal memulihkan file: ' + e.message, 'error') }
+  }
+
+  function handleEmptyTrash() {
+    if (files.length === 0) return
+    askConfirmDelete('Kosongkan semua file di Tong Sampah? Tindakan ini permanen!', async () => {
+      try {
+        // Remove all files from Supabase storage first
+        const paths = files.filter(f => f.storage_path).map(f => f.storage_path)
+        if (paths.length > 0) {
+          const { error } = await supabase.storage.from('files').remove(paths)
+          if (error) throw error
+        }
+        await api.delete('/files/trash/empty')
+        showToast('Tong sampah berhasil dikosongkan! 🧹', 'success')
+        setSelected([])
+        loadFiles()
+      } catch (e) { showToast('Gagal mengosongkan sampah: ' + e.message, 'error') }
     })
   }
 
@@ -281,13 +363,14 @@ export default function FileManager({ user, onOpenAdmin }) {
 
   async function handleRename(file, newName) {
     try {
-      const oldPath = `${basePath()}/${file.name}`
+      const oldPath = file.storage_path || `${basePath()}/${file.name}`
       const newPath = `${basePath()}/${Date.now()}_${newName}`
       const { error } = await supabase.storage.from('files').move(oldPath, newPath)
       if (error) throw error
+      await api.put(`/files/${file.id}`, { name: newName, storage_path: newPath })
       showToast('Berhasil di-rename! ✏️'); setRenameFile(null); loadFiles()
     } catch (e) { showToast('Gagal rename: ' + e.message, 'error') }
-  }
+}
 
   const handleDropZone = e => { e.preventDefault(); setDragOver(false); if (e.dataTransfer.files?.length) uploadFile(e.dataTransfer.files[0]) }
   const currentStorage = isPro ? PRO_STORAGE : FREE_STORAGE
@@ -348,6 +431,13 @@ export default function FileManager({ user, onOpenAdmin }) {
                 whileTap={{ scale: 0.95 }} onClick={handleDeleteSelected}
                 style={{ display: 'flex', alignItems: 'center', gap: 6, background: T.redBg, color: T.red, border: `1px solid ${T.red}44`, borderRadius: 100, padding: '7px 14px', fontSize: 13, fontWeight: 600, cursor: 'pointer', fontFamily: 'inherit' }}>
                 <Trash2 size={14} /> Hapus ({selected.length})
+              </motion.button>
+            )}
+            {currentFolder === 'trash' && selected.length === 0 && files.length > 0 && (
+              <motion.button initial={{ opacity: 0, scale: 0.8 }} animate={{ opacity: 1, scale: 1 }} exit={{ opacity: 0, scale: 0.8 }}
+                whileTap={{ scale: 0.95 }} onClick={handleEmptyTrash}
+                style={{ display: 'flex', alignItems: 'center', gap: 6, background: T.redBg, color: T.red, border: `1px solid ${T.red}44`, borderRadius: 100, padding: '7px 14px', fontSize: 13, fontWeight: 600, cursor: 'pointer', fontFamily: 'inherit' }}>
+                <Trash2 size={14} /> Kosongkan Sampah
               </motion.button>
             )}
           </AnimatePresence>
@@ -426,15 +516,15 @@ export default function FileManager({ user, onOpenAdmin }) {
               </AnimatePresence>
 
               <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
-                {[{ id: 'root', label: '🏠 Semua File', count: files.length }, ...folders.map(f => ({ id: f, label: `📁 ${f}` }))].map(item => (
+                {[{ id: 'root', label: '🏠 Semua File', count: currentFolder === 'root' ? files.length : undefined }, ...folders.map(f => ({ id: f, label: `📁 ${f}` })), { id: 'trash', label: '🗑️ Tong Sampah', count: trashFilesCount }].map(item => (
                   <motion.div key={item.id} whileHover={{ x: 4 }}
-                    style={{ display: 'flex', alignItems: 'center', padding: '9px 12px', borderRadius: 12, cursor: 'pointer', background: currentFolder === item.id ? `${T.accent}12` : 'transparent', color: currentFolder === item.id ? T.accent : T.textSub, fontWeight: currentFolder === item.id ? 700 : 500, fontSize: 14, transition: 'all 0.15s', border: currentFolder === item.id ? `1px solid ${T.accent}44` : '1px solid transparent' }}
+                    style={{ display: 'flex', alignItems: 'center', padding: '9px 12px', borderRadius: 12, cursor: 'pointer', background: currentFolder === item.id ? `${T.accent}12` : 'transparent', color: currentFolder === item.id ? T.accent : (item.id === 'trash' ? T.red : T.textSub), fontWeight: currentFolder === item.id ? 700 : 500, fontSize: 14, transition: 'all 0.15s', border: currentFolder === item.id ? `1px solid ${T.accent}44` : '1px solid transparent' }}
                     onClick={() => setFolder(item.id)}>
                     <span style={{ flex: 1 }}>{item.label}</span>
                     {item.count !== undefined && (
                       <span style={{ fontSize: 11, color: currentFolder === item.id ? T.accent : T.textMuted, background: currentFolder === item.id ? `${T.accent}12` : '#F3F4F6', padding: '2px 7px', borderRadius: 100 }}>{item.count}</span>
                     )}
-                    {item.id !== 'root' && (
+                    {item.id !== 'root' && item.id !== 'trash' && (
                       <motion.button whileHover={{ color: T.red }} onClick={e => { e.stopPropagation(); handleDeleteFolder(item.id) }}
                         style={{ marginLeft: 4, background: 'transparent', border: 'none', cursor: 'pointer', color: T.textMuted, padding: 4, borderRadius: 6, display: 'flex', alignItems: 'center' }}>
                         <X size={12} />
@@ -548,6 +638,7 @@ export default function FileManager({ user, onOpenAdmin }) {
                   <FileCard key={f.name} f={f} index={i} viewMode='grid'
                     onPreview={handlePreview} onRename={setRenameFile}
                     onShare={handleShare} onDownload={handleDownload} onDelete={handleDelete}
+                    onRestore={handleRestore}
                     selected={selected.includes(f.name)}
                     autoPreview={settings.autoPreview}
                     onFetchPreviewUrl={getPreviewUrl}
@@ -563,6 +654,7 @@ export default function FileManager({ user, onOpenAdmin }) {
                   <FileCard key={f.name} f={f} index={i} viewMode='list'
                     onPreview={handlePreview} onRename={setRenameFile}
                     onShare={handleShare} onDownload={handleDownload} onDelete={handleDelete}
+                    onRestore={handleRestore}
                     selected={selected.includes(f.name)}
                     autoPreview={settings.autoPreview}
                     onFetchPreviewUrl={getPreviewUrl}
@@ -610,6 +702,7 @@ export default function FileManager({ user, onOpenAdmin }) {
             onShare: f => handleShare(f.name),
             onDownload: f => handleDownload(f.name),
             onDelete: f => handleDelete(f.name),
+            onRestore: f => handleRestore(f.name),
           }} />
       )}
     </div>

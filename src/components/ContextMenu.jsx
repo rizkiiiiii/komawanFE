@@ -1,7 +1,7 @@
 import { useEffect, useRef } from 'react'
 import { motion, AnimatePresence } from 'framer-motion'
 import { T } from '../theme'
-import { Download, Edit2, Share2, Trash2, Eye } from 'lucide-react'
+import { Download, Edit2, Share2, Trash2, Eye, RefreshCw } from 'lucide-react'
 
 export default function ContextMenu({ x, y, file, onClose, actions }) {
   const menuRef = useRef(null)
@@ -58,12 +58,22 @@ export default function ContextMenu({ x, y, file, onClose, actions }) {
           </p>
         </div>
 
-        <ContextMenuItem icon={<Eye size={14} />} label="Preview" onClick={(e) => handleAction(e, actions.onPreview)} />
-        <ContextMenuItem icon={<Download size={14} />} label="Download" onClick={(e) => handleAction(e, actions.onDownload)} />
-        <ContextMenuItem icon={<Share2 size={14} />} label="Share Link" onClick={(e) => handleAction(e, actions.onShare)} />
-        <ContextMenuItem icon={<Edit2 size={14} />} label="Rename" onClick={(e) => handleAction(e, actions.onRename)} />
-        <div style={{ height: 1, background: T.border, margin: '4px 0' }} />
-        <ContextMenuItem icon={<Trash2 size={14} />} label="Hapus" onClick={(e) => handleAction(e, actions.onDelete)} danger />
+        {file.is_trashed ? (
+          <>
+            <ContextMenuItem icon={<RefreshCw size={14} />} label="Pulihkan" onClick={(e) => handleAction(e, actions.onRestore)} />
+            <div style={{ height: 1, background: T.border, margin: '4px 0' }} />
+            <ContextMenuItem icon={<Trash2 size={14} />} label="Hapus Permanen" onClick={(e) => handleAction(e, actions.onDelete)} danger />
+          </>
+        ) : (
+          <>
+            <ContextMenuItem icon={<Eye size={14} />} label="Preview" onClick={(e) => handleAction(e, actions.onPreview)} />
+            <ContextMenuItem icon={<Download size={14} />} label="Download" onClick={(e) => handleAction(e, actions.onDownload)} />
+            <ContextMenuItem icon={<Share2 size={14} />} label="Share Link" onClick={(e) => handleAction(e, actions.onShare)} />
+            <ContextMenuItem icon={<Edit2 size={14} />} label="Rename" onClick={(e) => handleAction(e, actions.onRename)} />
+            <div style={{ height: 1, background: T.border, margin: '4px 0' }} />
+            <ContextMenuItem icon={<Trash2 size={14} />} label="Hapus" onClick={(e) => handleAction(e, actions.onDelete)} danger />
+          </>
+        )}
       </motion.div>
     </AnimatePresence>
   )

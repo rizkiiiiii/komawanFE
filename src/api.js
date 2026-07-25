@@ -1,4 +1,5 @@
 import axios from 'axios';
+import { supabase } from './supabaseClient';
 
 const BASE_URL = process.env.REACT_APP_API_BASE_URL || "http://127.0.0.1:8000/api/v1";
 
@@ -14,13 +15,27 @@ api.interceptors.request.use((config) => {
   return config;
 });
 
+let handling401 = false; // cegah beberapa request 401 sekaligus memicu logout berkali-kali
+
 api.interceptors.response.use(
   (response) => response,
-  (error) => {
+  async (error) => {
     if (error.response?.status === 401) {
-      localStorage.removeItem('token');
-      localStorage.removeItem('roles');
-      window.location.href = '/';
+      if (!handling401) {
+        handling401 = true
+        localStorage.removeItem('token');
+        localStorage.removeItem('roles');
+        // Penting: logout dari Supabase juga. App.js menentukan tampilan
+        // (FileManager vs Auth) berdasarkan sesi Supabase, bukan token
+        // Laravel. Kalau cuma token Laravel yang dihapus, App.js masih
+        // anggap user login -> render FileManager lagi -> fetch lagi ->
+        // 401 lagi -> infinite reload loop.
+        await supabase.auth.signOut()
+        // Tidak perlu window.location.href -- App.js sudah dengar
+        // perubahan sesi lewat onAuthStateChange dan otomatis pindah
+        // ke halaman Auth begitu sesi hilang.
+        handling401 = false
+      }
     }
     return Promise.reject(error);
   }
