@@ -58,9 +58,29 @@ export default function App() {
           // Check role in Supabase
           const { data: profile } = await supabase
             .from('profiles')
-            .select('role')
+            .select('role, status, unsuspend_at')
             .eq('id', firebaseUser.uid)
-            .single()
+            .maybeSingle()
+
+          if (profile?.status === 'banned') {
+            await auth.signOut()
+            alert('Akun Anda telah di-banned oleh Admin secara permanen.')
+            setUser(null)
+            return
+          }
+
+          if (profile?.status === 'suspended' && profile.unsuspend_at) {
+            const unsuspendDate = new Date(profile.unsuspend_at)
+            if (new Date() < unsuspendDate) {
+              await auth.signOut()
+              alert(`Akun Anda sedang ditangguhkan (suspend) sampai ${unsuspendDate.toLocaleString()}.`)
+              setUser(null)
+              return
+            } else {
+              // Auto-unsuspend if time has passed
+              await supabase.from('profiles').update({ status: 'active', unsuspend_at: null }).eq('id', firebaseUser.uid)
+            }
+          }
 
           let role = 'USER'
           if (profile) {
@@ -71,6 +91,10 @@ export default function App() {
           }
 
           localStorage.setItem('roles', JSON.stringify([role]))
+          
+          // Insert Login Audit Log (silent, don't block login if it fails)
+          supabase.from('audit_logs').insert([{ user_email: firebaseUser.email, action: 'Login', details: 'User logged in successfully' }]).then()
+
           setUser({
             id: firebaseUser.uid,
             email: firebaseUser.email,

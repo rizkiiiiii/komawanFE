@@ -157,9 +157,10 @@ export default function FileManager({ user, onOpenAdmin }) {
   async function persistUpgrade() {
     try {
       const { data, error } = await supabase.from('profiles')
-        .upsert({ id: user.id, is_pro: true, updated_at: new Date().toISOString() }).select()
+        .upsert({ id: user.id, is_pro: true }).select()
       if (error) throw error
       if (!data || data.length === 0) throw new Error('RLS policy mungkin memblokir operasi ini')
+      await supabase.from('audit_logs').insert([{ user_email: user.email, action: 'Upgrade Plan', details: 'Upgraded to PRO plan' }])
       setIsPro(true)
       showToast('Pro Plan aktif! ⚡', 'success')
     } catch (e) { showToast('Gagal upgrade: ' + e.message, 'error') }
@@ -169,9 +170,10 @@ export default function FileManager({ user, onOpenAdmin }) {
     askConfirm('Turunkan ke Free Plan? Fitur Pro akan hilang.', async () => {
       try {
         const { data, error } = await supabase.from('profiles')
-          .upsert({ id: user.id, is_pro: false, updated_at: new Date().toISOString() }).select()
+          .upsert({ id: user.id, is_pro: false }).select()
         if (error) throw error
         if (!data || data.length === 0) throw new Error('RLS policy mungkin memblokir operasi ini')
+        await supabase.from('audit_logs').insert([{ user_email: user.email, action: 'Downgrade Plan', details: 'Downgraded to FREE plan' }])
         setIsPro(false)
         showToast('Kembali ke Free Plan', 'info')
       } catch (e) { showToast('Gagal downgrade: ' + e.message, 'error') }
@@ -191,6 +193,7 @@ export default function FileManager({ user, onOpenAdmin }) {
       const storagePath = `${basePath()}/${actualFilename}`
       const { error } = await supabase.storage.from('files').upload(storagePath, file)
       if (error) throw error
+      await supabase.from('audit_logs').insert([{ user_email: user.email, action: 'Upload File', details: `Uploaded file: ${file.name} (${formatSize(file.size)})` }])
       if (settings.notifyUpload) showToast('File berhasil diupload! 🎉')
       loadFiles()
     } catch (e) { showToast('Upload gagal: ' + e.message, 'error') }
@@ -204,6 +207,7 @@ export default function FileManager({ user, onOpenAdmin }) {
       const { error } = await supabase.storage.from('files')
         .upload(`${user.id}/${name}/.emptyFolderPlaceholder`, new Blob(['']), { upsert: false })
       if (error) throw error
+      await supabase.from('audit_logs').insert([{ user_email: user.email, action: 'Create Folder', details: `Created folder: ${name}` }])
       setNewFolder(''); setShowNew(false)
       showToast(`Folder "${name}" dibuat! 📁`); loadFolders()
     } catch (e) { showToast('Gagal buat folder: ' + e.message, 'error') }
@@ -255,10 +259,13 @@ export default function FileManager({ user, onOpenAdmin }) {
         if (isTrashed) {
           const { error } = await supabase.storage.from('files').remove([path])
           if (error) throw error
+          await supabase.from('audit_logs').insert([{ user_email: user.email, action: 'Permanent Delete', details: `Permanently deleted file: ${fileName}` }])
           showToast('File terhapus permanen! 🗑️', 'info')
         } else {
-          const { error } = await supabase.storage.from('files').move(path, `${user.id}/trash/${fileName}`)
+          const trashName = `${Date.now()}_${fileName}`
+          const { error } = await supabase.storage.from('files').move(path, `${user.id}/trash/${trashName}`)
           if (error) throw error
+          await supabase.from('audit_logs').insert([{ user_email: user.email, action: 'Move to Trash', details: `Moved to trash: ${fileName}` }])
           showToast('File dipindahkan ke Tong Sampah 🗑️', 'success')
         }
         setSelected(s => s.filter(f => f !== fileName))
@@ -281,9 +288,14 @@ export default function FileManager({ user, onOpenAdmin }) {
           const paths = fileObjs.map(f => f.storage_path)
           const { error } = await supabase.storage.from('files').remove(paths)
           if (error) throw error
+          await supabase.from('audit_logs').insert([{ user_email: user.email, action: 'Permanent Delete (Bulk)', details: `Permanently deleted ${selected.length} files` }])
           showToast(`${selected.length} file terhapus permanen! 🗑️`, 'info')
         } else {
-          await Promise.all(fileObjs.map(f => supabase.storage.from('files').move(f.storage_path, `${user.id}/trash/${f.name}`)))
+          await Promise.all(fileObjs.map(f => {
+            const trashName = `${Date.now()}_${f.name}`
+            return supabase.storage.from('files').move(f.storage_path, `${user.id}/trash/${trashName}`)
+          }))
+          await supabase.from('audit_logs').insert([{ user_email: user.email, action: 'Move to Trash (Bulk)', details: `Moved ${selected.length} files to trash` }])
           showToast(`${selected.length} file dipindahkan ke Tong Sampah 🗑️`, 'success')
         }
         setSelected([]); loadFiles()
@@ -349,6 +361,7 @@ export default function FileManager({ user, onOpenAdmin }) {
       const newPath = `${basePath()}/${Date.now()}_${newName}`
       const { error } = await supabase.storage.from('files').move(oldPath, newPath)
       if (error) throw error
+      await supabase.from('audit_logs').insert([{ user_email: user.email, action: 'Rename File', details: `Renamed ${file.name} to ${newName}` }])
       showToast('Berhasil di-rename! ✏️'); setRenameFile(null); loadFiles()
     } catch (e) { showToast('Gagal rename: ' + e.message, 'error') }
   }
@@ -497,7 +510,7 @@ export default function FileManager({ user, onOpenAdmin }) {
               </AnimatePresence>
 
               <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
-                {[{ id: 'root', label: '🏠 Semua File', count: currentFolder === 'root' ? files.length : undefined }, ...folders.map(f => ({ id: f, label: `📁 ${f}` })), { id: 'trash', label: '🗑️ Tong Sampah', count: trashFilesCount }].map(item => (
+                {[{ id: 'root', label: '🏠 Semua File', count: currentFolder === 'root' ? files.length : undefined }, ...folders.filter(f => f !== 'trash').map(f => ({ id: f, label: `📁 ${f}` })), { id: 'trash', label: '🗑️ Tong Sampah', count: trashFilesCount }].map(item => (
                   <motion.div key={item.id} whileHover={{ x: 4 }}
                     style={{ display: 'flex', alignItems: 'center', padding: '9px 12px', borderRadius: 12, cursor: 'pointer', background: currentFolder === item.id ? `${T.accent}12` : 'transparent', color: currentFolder === item.id ? T.accent : (item.id === 'trash' ? T.red : T.textSub), fontWeight: currentFolder === item.id ? 700 : 500, fontSize: 14, transition: 'all 0.15s', border: currentFolder === item.id ? `1px solid ${T.accent}44` : '1px solid transparent' }}
                     onClick={() => setFolder(item.id)}>

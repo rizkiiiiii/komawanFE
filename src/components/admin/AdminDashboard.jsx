@@ -45,21 +45,27 @@ export default function AdminDashboard({ user, onBack }) {
     setLoading(true)
     try {
       if (tab === 'stats') {
-        const { count: usersCount } = await supabase.from('profiles').select('*', { count: 'exact', head: true })
-        setStats({ total_users: usersCount || 0, total_admins: 0, total_files: 0, total_storage: 0 })
+        const { data, error } = await supabase.rpc('get_system_stats')
+        if (!error && data) {
+          setStats(data)
+        }
       } else if (tab === 'users') {
         const { data } = await supabase.from('profiles').select('*')
         setUsers((data || []).map(p => ({
           id: p.id,
-          name: p.email.split('@')[0],
-          email: p.email,
+          name: p.email ? p.email.split('@')[0] : 'Unknown',
+          email: p.email || 'Tanpa Email',
           roles: [{ name: p.role || 'USER' }],
-          status: 'active'
+          status: p.status || 'active'
         })))
       } else if (tab === 'files') {
-        setFiles([])
+        const { data, error } = await supabase.rpc('get_all_storage_objects')
+        if (!error && data) {
+          setFiles(data)
+        }
       } else if (tab === 'logs') {
-        setLogs([])
+        const { data } = await supabase.from('audit_logs').select('*').order('created_at', { ascending: false }).limit(50)
+        setLogs(data || [])
       }
     } catch (err) {
       console.error(err)
@@ -69,16 +75,56 @@ export default function AdminDashboard({ user, onBack }) {
     }
   }
 
-  async function handleBan(userId) { showToast('Tidak didukung di mode Serverless', 'error') }
-  async function handleUnban(userId) { showToast('Tidak didukung di mode Serverless', 'error') }
-  function handleOpenSuspendModal(userObj) { showToast('Tidak didukung di mode Serverless', 'error') }
-  async function handleConfirmSuspend(e) { e.preventDefault() }
-  async function handleUnsuspend(userId) { showToast('Tidak didukung di mode Serverless', 'error') }
+  async function handleBan(userId) {
+    if (!window.confirm('Yakin ingin membanned (blokir) pengguna ini secara permanen?')) return
+    try {
+      await supabase.from('profiles').update({ status: 'banned' }).eq('id', userId)
+      await supabase.from('audit_logs').insert([{ user_email: user.email, action: 'Ban User', details: `Banned user ID: ${userId}` }])
+      showToast('Pengguna berhasil di-ban! 🚫', 'success')
+      fetchData('users')
+    } catch (err) { showToast('Gagal mem-ban: ' + err.message, 'error') }
+  }
+
+  async function handleUnban(userId) {
+    if (!window.confirm('Yakin ingin membuka blokir (unban) pengguna ini?')) return
+    try {
+      await supabase.from('profiles').update({ status: 'active' }).eq('id', userId)
+      await supabase.from('audit_logs').insert([{ user_email: user.email, action: 'Unban User', details: `Unbanned user ID: ${userId}` }])
+      showToast('Blokir pengguna berhasil dibuka! ✅', 'success')
+      fetchData('users')
+    } catch (err) { showToast('Gagal unban: ' + err.message, 'error') }
+  }
+  function handleOpenSuspendModal(userObj) { setSuspendModal(userObj) }
+
+  async function handleConfirmSuspend(e) {
+    e.preventDefault()
+    setSuspendLoading(true)
+    try {
+      const unsuspendAt = new Date(Date.now() + suspendHours * 60 * 60 * 1000).toISOString()
+      await supabase.from('profiles').update({ status: 'suspended', unsuspend_at: unsuspendAt }).eq('id', suspendModal.id)
+      await supabase.from('audit_logs').insert([{ user_email: user.email, action: 'Suspend User', details: `Suspended user ID: ${suspendModal.id} for ${suspendHours} hours` }])
+      showToast(`Pengguna disuspend selama ${suspendHours} jam! ⏳`, 'success')
+      setSuspendModal(null)
+      fetchData('users')
+    } catch (err) { showToast('Gagal suspend: ' + err.message, 'error') }
+    setSuspendLoading(false)
+  }
+
+  async function handleUnsuspend(userId) {
+    if (!window.confirm('Yakin ingin membatalkan suspend pengguna ini?')) return
+    try {
+      await supabase.from('profiles').update({ status: 'active', unsuspend_at: null }).eq('id', userId)
+      await supabase.from('audit_logs').insert([{ user_email: user.email, action: 'Unsuspend User', details: `Unsuspended user ID: ${userId}` }])
+      showToast('Suspend berhasil dibatalkan! ✅', 'success')
+      fetchData('users')
+    } catch (err) { showToast('Gagal unsuspend: ' + err.message, 'error') }
+  }
 
   async function handlePromoteAdmin(userId, userName) {
     if (!window.confirm(`Yakin ingin mempromosikan "${userName}" menjadi Admin?`)) return
     try {
       await supabase.from('profiles').update({ role: 'ADMIN' }).eq('id', userId)
+      await supabase.from('audit_logs').insert([{ user_email: user.email, action: 'Promote Admin', details: `Promoted ${userName} to ADMIN` }])
       showToast('Berhasil dijadikan Admin! ⭐', 'success')
       fetchData('users')
     } catch (err) { showToast('Gagal mempromosikan admin: ' + err.message, 'error') }
@@ -350,19 +396,19 @@ export default function AdminDashboard({ user, onBack }) {
                                 display:'flex',alignItems:'center',justifyContent:'center',fontSize:16}}>
                                 📄
                               </div>
-                              <span style={{fontWeight:600,color:T.text,fontSize:14}}>{formatName(f.original_name)}</span>
+                              <span style={{fontWeight:600,color:T.text,fontSize:14}}>{formatName((f.name || '').split('/').pop())}</span>
                             </div>
                           </td>
                           <td style={{padding:'16px 20px',color:T.textSub,fontSize:13}}>
-                            {formatSize(f.size)}
+                            {formatSize(f.metadata?.size || 0)}
                           </td>
                           <td style={{padding:'16px 20px'}}>
                             <div style={{display:'flex',alignItems:'center',gap:8}}>
                               <div style={{width:24,height:24,borderRadius:'50%',background:T.gradient,color:'#fff',
                                 display:'flex',alignItems:'center',justifyContent:'center',fontSize:10,fontWeight:700}}>
-                                {getInitials(f.user?.email || '?')}
+                                {getInitials('Anonim')}
                               </div>
-                              <span style={{fontSize:13,color:T.textSub}}>{f.user?.email}</span>
+                              <span style={{fontSize:13,color:T.textSub}}>{'Anonim'}</span>
                             </div>
                           </td>
                           <td style={{padding:'16px 20px',color:T.textSub,fontSize:12}}>
