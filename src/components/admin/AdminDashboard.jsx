@@ -60,8 +60,15 @@ export default function AdminDashboard({ user, onBack }) {
         })))
       } else if (tab === 'files') {
         const { data, error } = await supabase.rpc('get_all_storage_objects')
+        const { data: profiles } = await supabase.from('profiles').select('id, email')
+        const profileMap = (profiles || []).reduce((acc, p) => ({ ...acc, [p.id]: p.email }), {})
+
         if (!error && data) {
-          setFiles(data)
+          const filesWithEmail = data.map(f => {
+            const uid = (f.name || '').split('/')[0]
+            return { ...f, user_email: profileMap[uid] || 'Anonim' }
+          })
+          setFiles(filesWithEmail)
         }
       } else if (tab === 'logs') {
         const { data } = await supabase.from('audit_logs').select('*').order('created_at', { ascending: false }).limit(50)
@@ -406,9 +413,9 @@ export default function AdminDashboard({ user, onBack }) {
                             <div style={{display:'flex',alignItems:'center',gap:8}}>
                               <div style={{width:24,height:24,borderRadius:'50%',background:T.gradient,color:'#fff',
                                 display:'flex',alignItems:'center',justifyContent:'center',fontSize:10,fontWeight:700}}>
-                                {getInitials('Anonim')}
+                                {getInitials(f.user_email)}
                               </div>
-                              <span style={{fontSize:13,color:T.textSub}}>{'Anonim'}</span>
+                              <span style={{fontSize:13,color:T.textSub}}>{f.user_email}</span>
                             </div>
                           </td>
                           <td style={{padding:'16px 20px',color:T.textSub,fontSize:12}}>

@@ -26,7 +26,7 @@ export default function LegalModal({ type, onClose }) {
   return (
     <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
       style={{
-        position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.88)',
+        position: 'fixed', inset: 0, background: 'rgba(255,255,255,0.8)',
         backdropFilter: 'blur(14px)', display: 'flex', alignItems: 'center',
         justifyContent: 'center', zIndex: 2000, padding: 20
       }} onClick={onClose}>
@@ -35,10 +35,10 @@ export default function LegalModal({ type, onClose }) {
         transition={{ type: 'spring', stiffness: 300, damping: 25 }}
         onClick={e => e.stopPropagation()}
         style={{
-          background: 'rgba(10,10,14,0.95)', backdropFilter: 'blur(24px)',
-          border: `1px solid ${T.borderStrong}`, borderRadius: 24,
+          background: '#ffffff', backdropFilter: 'blur(24px)',
+          border: `1px solid ${T.border}`, borderRadius: 24,
           width: 500, maxHeight: '85vh', display: 'flex', flexDirection: 'column',
-          boxShadow: `0 32px 80px rgba(0,0,0,0.9)`
+          boxShadow: `0 32px 80px rgba(0,0,0,0.1)`
         }}>
 
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '24px 28px', borderBottom: `1px solid ${T.border}` }}>
