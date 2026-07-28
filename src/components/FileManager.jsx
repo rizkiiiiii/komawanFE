@@ -243,7 +243,9 @@ export default function FileManager({ user, onOpenAdmin }) {
 
   async function handleDownload(fileName) {
     try {
-      const { data, error } = await supabase.storage.from('files').download(`${basePath()}/${fileName}`)
+      const fileObj = files.find(f => f.name === fileName)
+      const path = fileObj?.storage_path || `${basePath()}/${fileName}`
+      const { data, error } = await supabase.storage.from('files').download(path)
       if (error) throw error
       const url = URL.createObjectURL(data)
       const a = document.createElement('a'); a.href = url; a.download = formatName(fileName); a.click()
@@ -337,21 +339,19 @@ export default function FileManager({ user, onOpenAdmin }) {
   }
 
   async function handleShare(fileName) {
-    const linkDuration = isPro ? 604800 : 3600
     try {
-      const { data, error } = await supabase.storage.from('files')
-        .createSignedUrl(`${basePath()}/${fileName}`, linkDuration)
-      if (error) throw error
-      await copyToClipboard(data.signedUrl)
-      showToast(`Link disalin! Valid ${isPro ? '7 hari' : '1 jam'}. 🔗`, 'info')
-    } catch (e) { showToast('Gagal buat link: ' + e.message, 'error') }
+      const fileObj = files.find(f => f.name === fileName)
+      const path = fileObj?.storage_path || `${basePath()}/${fileName}`
+      const { data } = supabase.storage.from('files').getPublicUrl(path)
+      await copyToClipboard(data.publicUrl)
+      showToast('Link disalin! 🔗', 'info')
+    } catch (e) { showToast('Gagal share: ' + e.message, 'error') }
   }
 
   async function getPreviewUrl(file) {
-    const { data, error } = await supabase.storage.from('files')
-      .createSignedUrl(`${basePath()}/${file.name}`, 300)
-    if (error) throw error
-    return data.signedUrl
+    const path = file.storage_path || `${basePath()}/${file.name}`
+    const { data } = supabase.storage.from('files').getPublicUrl(path)
+    return data.publicUrl
   }
 
   async function handlePreview(file) {
