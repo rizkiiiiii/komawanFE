@@ -47,7 +47,7 @@ export default function App() {
     const token = localStorage.getItem('token')
     if (token) {
       api.get('/auth/me').then(res => {
-        setUser(res.data.data)
+        setUser(res.data.data.user)
         setLoading(false)
       }).catch(err => {
         console.warn('Gagal fetch user:', err)

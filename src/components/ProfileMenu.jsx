@@ -27,7 +27,7 @@ export default function ProfileMenu({ user, totalFiles, totalSize, totalFolders,
           </div>
           <div style={{ minWidth: 0 }}>
             <p style={{ margin: 0, fontSize: 14, fontWeight: 700, color: T.text, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-              {user.user_metadata?.full_name || user.email.split('@')[0]}
+              {user.name || (user.email && user.email.split('@')[0])}
             </p>
             <p style={{ margin: 0, fontSize: 12, color: T.textSub, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
               {user.email}
