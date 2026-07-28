@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react'
-import { supabase } from './supabaseClient'
+import api from './api'
 import Aurora from './components/Aurora'
 import Stars from './components/Stars'
 import Auth from './components/Auth'
@@ -44,15 +44,20 @@ export default function App() {
   const [viewMode, setViewMode] = useState('user') // 'user' | 'admin'
 
   useEffect(() => {
-    supabase.auth.getSession().then(({ data: { session } }) => {
-      setUser(session?.user ?? null)
+    const token = localStorage.getItem('token')
+    if (token) {
+      api.get('/auth/me').then(res => {
+        setUser(res.data.data)
+        setLoading(false)
+      }).catch(err => {
+        console.warn('Gagal fetch user:', err)
+        localStorage.removeItem('token')
+        localStorage.removeItem('roles')
+        setLoading(false)
+      })
+    } else {
       setLoading(false)
-    })
-    const { data: { subscription } } = supabase.auth.onAuthStateChange((_, session) => {
-      if (localStorage.getItem('suppress_auth_event') === '1') return
-      setUser(session?.user ?? null)
-    })
-    return () => subscription.unsubscribe()
+    }
   }, [])
 
   const [showLanding, setShowLanding] = useState(true)

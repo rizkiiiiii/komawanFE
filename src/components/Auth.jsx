@@ -1,7 +1,6 @@
 import { useState, useEffect } from 'react'
 import { motion, AnimatePresence } from 'framer-motion'
 import api from '../api'
-import { supabase } from '../supabaseClient'
 import { T } from '../theme'
 import useIsMobile from '../hooks/useIsMobile'
 import LegalModal from './modals/LegalModal'
@@ -40,16 +39,7 @@ export default function Auth({ onBackToLanding }) {
   const isLogin = mode === 'login'
   const isError = message && !message.toLowerCase().includes('berhasil') && !message.toLowerCase().includes('dikirim') && !message.toLowerCase().includes('diverifikasi')
 
-  async function finishSupabaseLogin() {
-    const { data: sbData, error: sbError } = await supabase.auth.signInWithPassword({ email, password })
-    if (sbError) {
-      localStorage.removeItem('token'); localStorage.removeItem('roles')
-      throw new Error('Akun belum sinkron dengan storage: ' + sbError.message)
-    }
-    if (sbData?.user?.id) {
-      try { await api.post('/auth/sync-supabase-uid', { supabase_uid: sbData.user.id }) } catch (_) {}
-    }
-  }
+
 
   async function handleSubmit() {
     if (!email.trim() || !password.trim()) { setMessage('Lengkapi semua kolom.'); return }
@@ -70,23 +60,14 @@ export default function Auth({ onBackToLanding }) {
           if (token && laravelUser) {
             localStorage.setItem('token', token)
             localStorage.setItem('roles', JSON.stringify(laravelUser.roles?.map(r => r.name) || []))
-            await finishSupabaseLogin()
-            setMode('login')
+            window.location.reload()
           } else {
             throw new Error('Respons login tidak dikenali.')
           }
         }
       } else {
         await api.post('/auth/register', { name: name || email.split('@')[0], email, password, password_confirmation: password })
-        localStorage.setItem('suppress_auth_event', '1')
-        const { error: sbError } = await supabase.auth.signUp({ email, password, options: { data: { full_name: name || email.split('@')[0] } } })
-        if (sbError) {
-          localStorage.removeItem('suppress_auth_event')
-          try { await api.post('/auth/register-rollback', { email }) } catch (_) {}
-          throw new Error('Registrasi storage gagal: ' + sbError.message + '. Silakan coba daftar ulang.')
-        }
-        await supabase.auth.signOut()
-        localStorage.removeItem('token'); localStorage.removeItem('roles'); localStorage.removeItem('suppress_auth_event')
+        localStorage.removeItem('token'); localStorage.removeItem('roles');
         setMessage('Kode verifikasi telah dikirim ke email kamu.')
         setOtpContext('register')
         setMode('otp')
@@ -108,9 +89,7 @@ export default function Auth({ onBackToLanding }) {
         if (!token || !laravelUser) throw new Error('Verifikasi berhasil tapi sesi tidak diterima. Coba login ulang.')
         localStorage.setItem('token', token)
         localStorage.setItem('roles', JSON.stringify(laravelUser.roles?.map(r => r.name) || []))
-        await finishSupabaseLogin()
-        setOtp('')
-        // Berhasil login penuh — App.js akan pick up via supabase.auth.onAuthStateChange / token di localStorage
+        window.location.reload()
       } else {
         // Verifikasi OTP setelah register: cuma tandai email terverifikasi, minta user login manual
         setMessage('Email berhasil diverifikasi. Silakan masuk.')
