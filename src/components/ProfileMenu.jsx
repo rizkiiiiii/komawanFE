@@ -1,7 +1,7 @@
 import { motion } from 'framer-motion'
 import { T } from '../theme'
 import { formatSize, getInitials } from '../utils'
-import api from '../api'
+import { auth } from '../firebaseClient'
 
 export default function ProfileMenu({ user, totalFiles, totalSize, totalFolders, isPro,
   onUpgrade, onDowngrade, settings, onSettingChange, onOpenAdmin }) {
@@ -97,20 +97,8 @@ export default function ProfileMenu({ user, totalFiles, totalSize, totalFolders,
       <div style={{ padding: '12px 20px 18px' }}>
         <motion.button whileHover={{ scale: 1.01 }} whileTap={{ scale: 0.98 }}
           onClick={async () => {
-            try { await api.post('/auth/logout') } catch (err) {}
-            localStorage.removeItem('token')
+            try { await auth.signOut() } catch (err) {}
             localStorage.removeItem('roles')
-            localStorage.removeItem('suppress_auth_event')
-
-            // Bersihkan sesi Supabase secara manual & instan (gak nunggu network),
-            // biar logout gak pernah "macet" gara-gara koneksi lambat.
-            Object.keys(localStorage)
-              .filter(k => k.startsWith('sb-') && k.endsWith('-auth-token'))
-              .forEach(k => localStorage.removeItem(k))
-
-            const { supabase } = await import('../supabaseClient')
-            supabase.auth.signOut().catch(() => {}) // proses revoke di background, gak ditunggu
-
             window.location.href = '/'
           }}
           style={{ width: '100%', padding: '10px', borderRadius: 100, background: T.redBg, color: T.red, border: `1px solid ${T.red}33`, fontSize: 12, fontWeight: 700, cursor: 'pointer', fontFamily: 'inherit' }}>

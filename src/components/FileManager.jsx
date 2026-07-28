@@ -1,5 +1,6 @@
 import { useState, useEffect, useRef } from 'react'
 import { motion, AnimatePresence } from 'framer-motion'
+import { supabase } from '../supabaseClient'
 import { T, FREE_STORAGE, FREE_MAX_FILE, PRO_STORAGE, PRO_MAX_FILE } from '../theme'
 import { formatSize, formatName, getInitials, copyToClipboard } from '../utils'
 import useIsMobile from '../hooks/useIsMobile'
@@ -11,7 +12,7 @@ import RenameModal from './modals/RenameModal'
 import UpgradeModal from './modals/UpgradeModal'
 import ConfirmModal from './modals/ConfirmModal'
 import ContextMenu from './ContextMenu'
-import api from '../api'
+
 import { Database, HardDrive, Search, FolderPlus, UploadCloud, Grid3X3, List, RefreshCw, Trash2, X, LogOut } from 'lucide-react'
 
 function CloudBg({ top, left, bottom, right, opacity = 0.4, delay = 0, scale = 1 }) {
@@ -106,74 +107,72 @@ export default function FileManager({ user, onOpenAdmin }) {
     return () => document.removeEventListener('mousedown', h)
   }, [])
 
-  async function loadTrashCount() {
-    try {
-      const res = await api.get('/files/trash')
-      setTrashFilesCount(res.data.data?.length || 0)
-    } catch (e) { console.warn(e) }
-  }
-
   async function loadFiles() {
     try {
-      const url = currentFolder === 'trash' ? '/files/trash' : '/files'
-      const res = await api.get(url, { params: { folder_id: currentFolder } })
-      if (res.data && res.data.data) {
-        const mapped = res.data.data.map(f => ({
-          id: f.id,
-          name: f.filename,
-          original_name: f.original_name,
-          size: f.size,
-          metadata: { size: f.size },
-          created_at: f.deleted_at || f.created_at,
-          is_trashed: currentFolder === 'trash',
-          storage_path: f.storage_path,
-          public_url: f.public_url
-        }))
-        setFiles(mapped)
-        if (currentFolder === 'trash') {
-          setTrashFilesCount(mapped.length)
-        } else {
-          loadTrashCount()
-        }
+      const path = basePath()
+      const { data, error } = await supabase.storage.from('files').list(path)
+      if (error) throw error
+      const mapped = data.filter(f => f.name !== '.emptyFolderPlaceholder').map(f => ({
+        id: f.id || f.name,
+        name: f.name,
+        original_name: f.name.replace(/^\d+_/, ''),
+        size: f.metadata?.size || 0,
+        metadata: { size: f.metadata?.size || 0 },
+        created_at: f.created_at,
+        is_trashed: currentFolder === 'trash',
+        storage_path: `${path}/${f.name}`
+      }))
+      setFiles(mapped)
+      if (currentFolder === 'trash') {
+        setTrashFilesCount(mapped.length)
+      } else {
+        const { data: trashData } = await supabase.storage.from('files').list(`${user.id}/trash`)
+        setTrashFilesCount(trashData?.filter(f => f.name !== '.emptyFolderPlaceholder')?.length || 0)
       }
     } catch (e) { showToast('Gagal memuat file', 'error') }
   }
 
   async function loadFolders() {
     try {
-      const res = await api.get('/folders')
-      if (res.data?.data) {
-        setFolders(res.data.data)
-      }
+      const { data, error } = await supabase.storage.from('files').list(user.id)
+      if (error) throw error
+      setFolders(data.filter(f => !f.metadata).map(f => f.name))
     } catch (e) { showToast('Gagal memuat folder: ' + e.message, 'error') }
   }
 
   async function loadProfile() {
     try {
-      const roles = JSON.parse(localStorage.getItem('roles') || '[]')
-      setIsPro(roles.includes('PRO') || roles.includes('ADMIN'))
-    } catch (e) { setIsPro(false) }
+      const { data, error } = await supabase.from('profiles')
+        .select('is_pro').eq('id', user.id).maybeSingle()
+      if (error) throw error
+      if (data) {
+        setIsPro(data.is_pro)
+      } else {
+        await supabase.from('profiles').upsert({ id: user.id, is_pro: false })
+        setIsPro(false)
+      }
+    } catch (e) { console.warn('Gagal memuat profil:', e.message) }
   }
 
   async function persistUpgrade() {
     try {
-      await api.post('/subscription/upgrade')
+      const { data, error } = await supabase.from('profiles')
+        .upsert({ id: user.id, is_pro: true, updated_at: new Date().toISOString() }).select()
+      if (error) throw error
+      if (!data || data.length === 0) throw new Error('RLS policy mungkin memblokir operasi ini')
       setIsPro(true)
-      const roles = JSON.parse(localStorage.getItem('roles') || '[]')
-      if (!roles.includes('PRO')) {
-        roles.push('PRO')
-        localStorage.setItem('roles', JSON.stringify(roles))
-      }
       showToast('Pro Plan aktif! ⚡', 'success')
-    } catch (e) { showToast('Gagal upgrade: ' + (e.response?.data?.message || e.message), 'error') }
+    } catch (e) { showToast('Gagal upgrade: ' + e.message, 'error') }
   }
 
   function persistDowngrade() {
     askConfirm('Turunkan ke Free Plan? Fitur Pro akan hilang.', async () => {
       try {
+        const { data, error } = await supabase.from('profiles')
+          .upsert({ id: user.id, is_pro: false, updated_at: new Date().toISOString() }).select()
+        if (error) throw error
+        if (!data || data.length === 0) throw new Error('RLS policy mungkin memblokir operasi ini')
         setIsPro(false)
-        const roles = JSON.parse(localStorage.getItem('roles') || '[]')
-        localStorage.setItem('roles', JSON.stringify(roles.filter(r => r !== 'PRO')))
         showToast('Kembali ke Free Plan', 'info')
       } catch (e) { showToast('Gagal downgrade: ' + e.message, 'error') }
     })
@@ -188,16 +187,13 @@ export default function FileManager({ user, onOpenAdmin }) {
     setUploading(true); setProgress(0)
     const iv = setInterval(() => setProgress(p => Math.min(p + 8, 88)), 150)
     try {
-      const formData = new FormData()
-      formData.append('file', file)
-      formData.append('folder_id', currentFolder)
-      
-      await api.post('/files', formData, {
-        headers: { 'Content-Type': 'multipart/form-data' }
-      })
+      const actualFilename = `${Date.now()}_${file.name}`
+      const storagePath = `${basePath()}/${actualFilename}`
+      const { error } = await supabase.storage.from('files').upload(storagePath, file)
+      if (error) throw error
       if (settings.notifyUpload) showToast('File berhasil diupload! 🎉')
       loadFiles()
-    } catch (e) { showToast('Upload gagal: ' + (e.response?.data?.message || e.message), 'error') }
+    } catch (e) { showToast('Upload gagal: ' + e.message, 'error') }
     finally { clearInterval(iv); setProgress(100); setTimeout(() => { setUploading(false); setProgress(0) }, 600) }
   }
 
@@ -205,30 +201,39 @@ export default function FileManager({ user, onOpenAdmin }) {
     const name = newFolderName.trim().replace(/[^\w\s-]/g, '')
     if (!name) { showToast('Nama folder tidak valid!', 'error'); return }
     try {
-      await api.post('/folders', { name })
+      const { error } = await supabase.storage.from('files')
+        .upload(`${user.id}/${name}/.emptyFolderPlaceholder`, new Blob(['']), { upsert: false })
+      if (error) throw error
       setNewFolder(''); setShowNew(false)
       showToast(`Folder "${name}" dibuat! 📁`); loadFolders()
-    } catch (e) { showToast('Gagal buat folder: ' + (e.response?.data?.message || e.message), 'error') }
+    } catch (e) { showToast('Gagal buat folder: ' + e.message, 'error') }
   }
 
-  function handleDeleteFolder(folderId) {
-    askConfirmDelete(`Hapus folder ini beserta isinya?`, async () => {
+  function handleDeleteFolder(folderName) {
+    askConfirmDelete(`Hapus folder "${folderName}" beserta isinya?`, async () => {
       try {
-        await api.delete(`/folders/${folderId}`)
-        if (currentFolder === folderId) setFolder('root')
-        showToast(`Folder dihapus!`); loadFolders()
-      } catch (e) { showToast('Gagal hapus folder: ' + (e.response?.data?.message || e.message), 'error') }
+        const fp = `${user.id}/${folderName}`
+        const { data: contents } = await supabase.storage.from('files').list(fp)
+        if (contents?.length) {
+          const paths = contents.map(f => `${fp}/${f.name}`)
+          const { data, error } = await supabase.storage.from('files').remove(paths)
+          if (error) throw error
+          if (data && data.length === 0) throw new Error("Akses ditolak oleh Policy Supabase (RLS). Cek SQL Dashboard.")
+        }
+        await supabase.storage.from('files').remove([`${fp}/.emptyFolderPlaceholder`])
+        if (currentFolder === folderName) setFolder('root')
+        showToast(`Folder "${folderName}" dihapus!`); loadFolders()
+      } catch (e) { showToast('Gagal hapus folder: ' + e.message, 'error') }
     })
   }
 
   async function handleDownload(fileName) {
     try {
       const fileObj = files.find(f => f.name === fileName)
-      if (!fileObj || !fileObj.public_url) throw new Error('File tidak ditemukan')
-      
-      const response = await fetch(fileObj.public_url)
-      const blob = await response.blob()
-      const url = URL.createObjectURL(blob)
+      const path = fileObj?.storage_path || `${basePath()}/${fileName}`
+      const { data, error } = await supabase.storage.from('files').download(path)
+      if (error) throw error
+      const url = URL.createObjectURL(data)
       const a = document.createElement('a'); a.href = url; a.download = formatName(fileName); a.click()
       URL.revokeObjectURL(url)
       showToast('File diunduh! ⬇️', 'info')
@@ -246,16 +251,19 @@ export default function FileManager({ user, onOpenAdmin }) {
 
     askConfirmDelete(confirmMsg, async () => {
       try {
+        const path = fileObj.storage_path || `${basePath()}/${fileName}`
         if (isTrashed) {
-          await api.delete(`/files/${fileObj.id}/force`)
+          const { error } = await supabase.storage.from('files').remove([path])
+          if (error) throw error
           showToast('File terhapus permanen! 🗑️', 'info')
         } else {
-          await api.delete(`/files/${fileObj.id}`)
+          const { error } = await supabase.storage.from('files').move(path, `${user.id}/trash/${fileName}`)
+          if (error) throw error
           showToast('File dipindahkan ke Tong Sampah 🗑️', 'success')
         }
         setSelected(s => s.filter(f => f !== fileName))
         loadFiles()
-      } catch (e) { showToast('Gagal menghapus: ' + (e.response?.data?.message || e.message), 'error') }
+      } catch (e) { showToast('Gagal menghapus: ' + e.message, 'error') }
     })
   }
 
@@ -270,14 +278,16 @@ export default function FileManager({ user, onOpenAdmin }) {
         const fileObjs = files.filter(f => selected.includes(f.name))
         
         if (isTrashed) {
-          await Promise.all(fileObjs.map(f => api.delete(`/files/${f.id}/force`)))
+          const paths = fileObjs.map(f => f.storage_path)
+          const { error } = await supabase.storage.from('files').remove(paths)
+          if (error) throw error
           showToast(`${selected.length} file terhapus permanen! 🗑️`, 'info')
         } else {
-          await Promise.all(fileObjs.map(f => api.delete(`/files/${f.id}`)))
+          await Promise.all(fileObjs.map(f => supabase.storage.from('files').move(f.storage_path, `${user.id}/trash/${f.name}`)))
           showToast(`${selected.length} file dipindahkan ke Tong Sampah 🗑️`, 'success')
         }
         setSelected([]); loadFiles()
-      } catch (e) { showToast('Gagal menghapus: ' + (e.response?.data?.message || e.message), 'error') }
+      } catch (e) { showToast('Gagal menghapus: ' + e.message, 'error') }
     })
   }
 
@@ -285,7 +295,8 @@ export default function FileManager({ user, onOpenAdmin }) {
     const fileObj = files.find(f => f.name === fileName)
     if (!fileObj) return
     try {
-      await api.put(`/files/${fileObj.id}/restore`)
+      const { error } = await supabase.storage.from('files').move(fileObj.storage_path, `${user.id}/${fileObj.name}`)
+      if (error) throw error
       showToast('File berhasil dipulihkan! ↺', 'success')
       setSelected(s => s.filter(f => f !== fileName))
       loadFiles()
@@ -296,39 +307,50 @@ export default function FileManager({ user, onOpenAdmin }) {
     if (files.length === 0) return
     askConfirmDelete('Kosongkan semua file di Tong Sampah? Tindakan ini permanen!', async () => {
       try {
-        await api.delete('/files/trash/empty')
+        const { data } = await supabase.storage.from('files').list(`${user.id}/trash`)
+        const paths = data.map(f => `${user.id}/trash/${f.name}`)
+        if (paths.length > 0) {
+          const { error } = await supabase.storage.from('files').remove(paths)
+          if (error) throw error
+        }
         showToast('Tong sampah berhasil dikosongkan! 🧹', 'success')
         setSelected([])
         loadFiles()
-      } catch (e) { showToast('Gagal mengosongkan sampah: ' + (e.response?.data?.message || e.message), 'error') }
+      } catch (e) { showToast('Gagal mengosongkan sampah: ' + e.message, 'error') }
     })
   }
 
   async function handleShare(fileName) {
     try {
       const fileObj = files.find(f => f.name === fileName)
-      if (!fileObj || !fileObj.public_url) throw new Error('File tidak memiliki URL publik')
-      await copyToClipboard(fileObj.public_url)
+      const path = fileObj?.storage_path || `${basePath()}/${fileName}`
+      const { data } = supabase.storage.from('files').getPublicUrl(path)
+      await copyToClipboard(data.publicUrl)
       showToast('Link disalin! 🔗', 'info')
     } catch (e) { showToast('Gagal share: ' + e.message, 'error') }
   }
 
   async function getPreviewUrl(file) {
-    return file.public_url
+    const path = file.storage_path || `${basePath()}/${file.name}`
+    const { data } = supabase.storage.from('files').getPublicUrl(path)
+    return data.publicUrl
   }
 
   async function handlePreview(file) {
     try {
-      const url = file.public_url
+      const url = await getPreviewUrl(file)
       setPreviewUrl(url); setPreviewFile(file)
     } catch (e) { showToast('Gagal preview: ' + e.message, 'error') }
   }
 
   async function handleRename(file, newName) {
     try {
-      await api.put(`/files/${file.id}`, { name: newName })
+      const oldPath = file.storage_path || `${basePath()}/${file.name}`
+      const newPath = `${basePath()}/${Date.now()}_${newName}`
+      const { error } = await supabase.storage.from('files').move(oldPath, newPath)
+      if (error) throw error
       showToast('Berhasil di-rename! ✏️'); setRenameFile(null); loadFiles()
-    } catch (e) { showToast('Gagal rename: ' + (e.response?.data?.message || e.message), 'error') }
+    } catch (e) { showToast('Gagal rename: ' + e.message, 'error') }
   }
 
   const handleDropZone = e => { e.preventDefault(); setDragOver(false); if (e.dataTransfer.files?.length) uploadFile(e.dataTransfer.files[0]) }
@@ -475,7 +497,7 @@ export default function FileManager({ user, onOpenAdmin }) {
               </AnimatePresence>
 
               <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
-                {[{ id: 'root', label: '🏠 Semua File', count: currentFolder === 'root' ? files.length : undefined }, ...folders.map(f => ({ id: f.id, label: `📁 ${f.name}` })), { id: 'trash', label: '🗑️ Tong Sampah', count: trashFilesCount }].map(item => (
+                {[{ id: 'root', label: '🏠 Semua File', count: currentFolder === 'root' ? files.length : undefined }, ...folders.map(f => ({ id: f, label: `📁 ${f}` })), { id: 'trash', label: '🗑️ Tong Sampah', count: trashFilesCount }].map(item => (
                   <motion.div key={item.id} whileHover={{ x: 4 }}
                     style={{ display: 'flex', alignItems: 'center', padding: '9px 12px', borderRadius: 12, cursor: 'pointer', background: currentFolder === item.id ? `${T.accent}12` : 'transparent', color: currentFolder === item.id ? T.accent : (item.id === 'trash' ? T.red : T.textSub), fontWeight: currentFolder === item.id ? 700 : 500, fontSize: 14, transition: 'all 0.15s', border: currentFolder === item.id ? `1px solid ${T.accent}44` : '1px solid transparent' }}
                     onClick={() => setFolder(item.id)}>

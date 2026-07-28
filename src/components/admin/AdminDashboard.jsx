@@ -1,7 +1,7 @@
 import { useState, useEffect, useRef } from 'react'
 import { motion, AnimatePresence } from 'framer-motion'
 import { T } from '../../theme'
-import api from '../../api'
+import { supabase } from '../../supabaseClient'
 import { formatSize, formatName, getInitials } from '../../utils'
 import Toast from '../Toast'
 
@@ -45,126 +45,57 @@ export default function AdminDashboard({ user, onBack }) {
     setLoading(true)
     try {
       if (tab === 'stats') {
-        const res = await api.get('/admin/stats')
-        setStats(res.data.data)
+        const { count: usersCount } = await supabase.from('profiles').select('*', { count: 'exact', head: true })
+        setStats({ total_users: usersCount || 0, total_admins: 0, total_files: 0, total_storage: 0 })
       } else if (tab === 'users') {
-        const res = await api.get('/users')
-        setUsers(res.data.data)
+        const { data } = await supabase.from('profiles').select('*')
+        setUsers((data || []).map(p => ({
+          id: p.id,
+          name: p.email.split('@')[0],
+          email: p.email,
+          roles: [{ name: p.role || 'USER' }],
+          status: 'active'
+        })))
       } else if (tab === 'files') {
-        const res = await api.get('/admin/files')
-        setFiles(res.data.data)
+        setFiles([])
       } else if (tab === 'logs') {
-        const res = await api.get('/admin/audit-logs')
-        setLogs(res.data.data)
+        setLogs([])
       }
     } catch (err) {
-      if (err.response?.status === 403) {
-        // Role user ini sudah dicabut/diturunkan oleh Super Admin (mis. demote/ban/suspend),
-        // tapi sesi lama di browser masih nyimpen role admin di localStorage.
-        if (accessRevokedRef.current) return // sudah pernah ditangani, jangan ulang lagi
-        accessRevokedRef.current = true
-        localStorage.removeItem('token')
-        localStorage.removeItem('roles')
-        alert('Akses admin kamu sudah dicabut. Silakan login ulang.')
-        window.location.href = '/' // hard redirect, buang seluruh state React lama
-        return
-      } else {
-        console.error(err)
-        showToast('Gagal memuat data: ' + (err.response?.data?.message || err.message), 'error')
-      }
+      console.error(err)
+      showToast('Gagal memuat data', 'error')
     } finally {
       setLoading(false)
     }
   }
 
-  async function handleBan(userId) {
-    if (!window.confirm('Yakin ingin memblokir permanen pengguna ini?')) return
-    try {
-      await api.put(`/users/${userId}/ban`)
-      showToast('Pengguna diblokir permanen', 'success')
-      fetchData('users')
-    } catch (err) { showToast('Gagal memblokir: ' + (err.response?.data?.message || err.message), 'error') }
-  }
-
-  async function handleUnban(userId) {
-    try {
-      await api.put(`/users/${userId}/unban`)
-      showToast('Blokir dibuka', 'success')
-      fetchData('users')
-    } catch (err) { showToast('Gagal membuka blokir: ' + (err.response?.data?.message || err.message), 'error') }
-  }
-
-  function handleOpenSuspendModal(userObj) {
-    setSuspendModal(userObj)
-    setSuspendHours(1)
-  }
-
-  async function handleConfirmSuspend(e) {
-    e.preventDefault()
-    if (!suspendModal) return
-    const hoursNum = parseInt(suspendHours)
-    if (isNaN(hoursNum) || hoursNum < 1 || hoursNum > 12) {
-      showToast('Durasi penangguhan harus antara 1-12 jam', 'error')
-      return
-    }
-    setSuspendLoading(true)
-    try {
-      await api.put(`/users/${suspendModal.id}/suspend`, { hours: hoursNum })
-      showToast(`Pengguna ditangguhkan selama ${hoursNum} jam`, 'success')
-      setSuspendModal(null)
-      fetchData('users')
-    } catch (err) { showToast('Gagal menangguhkan: ' + (err.response?.data?.message || err.message), 'error') }
-    finally { setSuspendLoading(false) }
-  }
-
-  async function handleUnsuspend(userId) {
-    try {
-      await api.put(`/users/${userId}/unsuspend`)
-      showToast('Penangguhan dicabut', 'success')
-      fetchData('users')
-    } catch (err) { showToast('Gagal membuka penangguhan: ' + (err.response?.data?.message || err.message), 'error') }
-  }
+  async function handleBan(userId) { showToast('Tidak didukung di mode Serverless', 'error') }
+  async function handleUnban(userId) { showToast('Tidak didukung di mode Serverless', 'error') }
+  function handleOpenSuspendModal(userObj) { showToast('Tidak didukung di mode Serverless', 'error') }
+  async function handleConfirmSuspend(e) { e.preventDefault() }
+  async function handleUnsuspend(userId) { showToast('Tidak didukung di mode Serverless', 'error') }
 
   async function handlePromoteAdmin(userId, userName) {
     if (!window.confirm(`Yakin ingin mempromosikan "${userName}" menjadi Admin?`)) return
     try {
-      const res = await api.put(`/users/${userId}/promote-admin`)
-      showToast(res.data.message || 'Berhasil dijadikan Admin! ⭐', 'success')
+      await supabase.from('profiles').update({ role: 'ADMIN' }).eq('id', userId)
+      showToast('Berhasil dijadikan Admin! ⭐', 'success')
       fetchData('users')
-    } catch (err) { showToast('Gagal mempromosikan admin: ' + (err.response?.data?.message || err.message), 'error') }
+    } catch (err) { showToast('Gagal mempromosikan admin: ' + err.message, 'error') }
   }
 
   async function handleDemoteUser(userId, userName) {
     if (!window.confirm(`Yakin ingin mengembalikan peran "${userName}" menjadi User biasa?`)) return
     try {
-      const res = await api.put(`/users/${userId}/demote-user`)
-      showToast(res.data.message || 'Peran dikembalikan ke User 👤', 'info')
+      await supabase.from('profiles').update({ role: 'USER' }).eq('id', userId)
+      showToast('Peran dikembalikan ke User 👤', 'info')
       fetchData('users')
-    } catch (err) { showToast('Gagal mengubah peran: ' + (err.response?.data?.message || err.message), 'error') }
+    } catch (err) { showToast('Gagal mengubah peran: ' + err.message, 'error') }
   }
 
   async function handleCreateAdmin(e) {
     e.preventDefault()
-    if (!adminForm.name.trim() || !adminForm.email.trim() || !adminForm.password.trim()) {
-      showToast('Mohon lengkapi semua kolom!', 'error')
-      return
-    }
-    if (adminForm.password.length < 6) {
-      showToast('Password minimal 6 karakter!', 'error')
-      return
-    }
-    setAdminLoading(true)
-    try {
-      await api.post('/admin/create-admin', adminForm)
-      showToast('Akun Admin berhasil dibuat! 🎉', 'success')
-      setShowCreateAdmin(false)
-      setAdminForm({ name: '', email: '', password: '' })
-      fetchData('users')
-    } catch (err) {
-      showToast('Gagal membuat admin: ' + (err.response?.data?.message || err.message), 'error')
-    } finally {
-      setAdminLoading(false)
-    }
+    showToast('Buat admin dari Firebase console', 'error')
   }
 
   const statCards = [

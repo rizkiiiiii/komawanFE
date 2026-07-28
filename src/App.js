@@ -1,5 +1,7 @@
 import { useState, useEffect } from 'react'
-import api from './api'
+import { auth } from './firebaseClient'
+import { onAuthStateChanged } from 'firebase/auth'
+import { supabase } from './supabaseClient'
 import Aurora from './components/Aurora'
 import Stars from './components/Stars'
 import Auth from './components/Auth'
@@ -44,20 +46,53 @@ export default function App() {
   const [viewMode, setViewMode] = useState('user') // 'user' | 'admin'
 
   useEffect(() => {
-    const token = localStorage.getItem('token')
-    if (token) {
-      api.get('/auth/me').then(res => {
-        setUser(res.data.data.user)
-        setLoading(false)
-      }).catch(err => {
-        console.warn('Gagal fetch user:', err)
-        localStorage.removeItem('token')
-        localStorage.removeItem('roles')
-        setLoading(false)
-      })
-    } else {
+    const unsubscribe = onAuthStateChanged(auth, async (firebaseUser) => {
+      if (firebaseUser) {
+        if (!firebaseUser.emailVerified) {
+          setUser(null)
+          setLoading(false)
+          return
+        }
+
+        try {
+          // Check role in Supabase
+          const { data: profile } = await supabase
+            .from('profiles')
+            .select('role')
+            .eq('id', firebaseUser.uid)
+            .single()
+
+          let role = 'USER'
+          if (profile) {
+            role = profile.role
+          } else {
+            // Create default profile
+            await supabase.from('profiles').insert([{ id: firebaseUser.uid, email: firebaseUser.email, role: 'USER' }])
+          }
+
+          localStorage.setItem('roles', JSON.stringify([role]))
+          setUser({
+            id: firebaseUser.uid,
+            email: firebaseUser.email,
+            name: firebaseUser.displayName || firebaseUser.email.split('@')[0],
+            roles: [role]
+          })
+        } catch (err) {
+          console.error('Gagal fetch profile dari Supabase:', err)
+          setUser({
+            id: firebaseUser.uid,
+            email: firebaseUser.email,
+            name: firebaseUser.displayName || firebaseUser.email.split('@')[0],
+            roles: ['USER']
+          })
+        }
+      } else {
+        setUser(null)
+      }
       setLoading(false)
-    }
+    })
+
+    return () => unsubscribe()
   }, [])
 
   const [showLanding, setShowLanding] = useState(true)

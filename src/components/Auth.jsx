@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react'
 import { motion, AnimatePresence } from 'framer-motion'
-import api from '../api'
+import { auth } from '../firebaseClient'
+import { createUserWithEmailAndPassword, signInWithEmailAndPassword, sendPasswordResetEmail, sendEmailVerification, updateProfile } from 'firebase/auth'
 import { T } from '../theme'
 import useIsMobile from '../hooks/useIsMobile'
 import LegalModal from './modals/LegalModal'
@@ -21,24 +22,13 @@ export default function Auth({ onBackToLanding }) {
   const [email, setEmail]           = useState('')
   const [password, setPassword]     = useState('')
   const [name, setName]             = useState('')
-  const [otp, setOtp]               = useState('')
-  const [otpContext, setOtpContext] = useState('register') // 'register' | 'login'
   const [loading, setLoading]       = useState(false)
   const [message, setMessage]       = useState('')
   const [showPass, setShowPass]     = useState(false)
-  const [resending, setResending]   = useState(false)
-  const [resendCooldown, setResendCooldown] = useState(0)
   const [legalModal, setLegalModal] = useState(null)
-
-  useEffect(() => {
-    let timer
-    if (resendCooldown > 0) timer = setTimeout(() => setResendCooldown(c => c - 1), 1000)
-    return () => clearTimeout(timer)
-  }, [resendCooldown])
 
   const isLogin = mode === 'login'
   const isError = message && !message.toLowerCase().includes('berhasil') && !message.toLowerCase().includes('dikirim') && !message.toLowerCase().includes('diverifikasi')
-
 
 
   async function handleSubmit() {
@@ -48,87 +38,42 @@ export default function Auth({ onBackToLanding }) {
     setLoading(true); setMessage('')
     try {
       if (mode === 'login') {
-        const laravelRes = await api.post('/auth/login', { email, password })
-        const result = laravelRes.data.data
-        if (result?.requires_otp) {
-          setOtpContext('login')
-          setMessage(result.message || 'Kode OTP verifikasi login telah dikirim ke email kamu.')
-          setMode('otp')
+        const userCredential = await signInWithEmailAndPassword(auth, email, password)
+        if (!userCredential.user.emailVerified) {
+          setMessage('Email belum diverifikasi. Silakan cek kotak masuk Anda.')
+          auth.signOut()
         } else {
-          // fallback in case backend ever returns token/user directly without OTP
-          const { token, user: laravelUser } = result || {}
-          if (token && laravelUser) {
-            localStorage.setItem('token', token)
-            localStorage.setItem('roles', JSON.stringify(laravelUser.roles?.map(r => r.name) || []))
-            window.location.reload()
-          } else {
-            throw new Error('Respons login tidak dikenali.')
-          }
+          // Firebase auth state listener in App.js will handle the rest
         }
       } else {
-        await api.post('/auth/register', { name: name || email.split('@')[0], email, password, password_confirmation: password })
-        localStorage.removeItem('token'); localStorage.removeItem('roles');
-        setMessage('Kode verifikasi telah dikirim ke email kamu.')
-        setOtpContext('register')
-        setMode('otp')
+        const userCredential = await createUserWithEmailAndPassword(auth, email, password)
+        await updateProfile(userCredential.user, { displayName: name || email.split('@')[0] })
+        await sendEmailVerification(userCredential.user)
+        setMessage('Link verifikasi telah dikirim ke email kamu. Silakan cek dan verifikasi sebelum login.')
+        auth.signOut()
+        setMode('login')
       }
     } catch (err) {
-      setMessage(err.response?.data?.message || err.message || 'Koneksi bermasalah, coba lagi.')
+      console.error(err)
+      let errorMsg = 'Koneksi bermasalah, coba lagi.'
+      if (err.code === 'auth/email-already-in-use') errorMsg = 'Email sudah terdaftar.'
+      else if (err.code === 'auth/wrong-password' || err.code === 'auth/user-not-found' || err.code === 'auth/invalid-credential') errorMsg = 'Email atau kata sandi salah.'
+      else if (err.code === 'auth/too-many-requests') errorMsg = 'Terlalu banyak percobaan. Coba lagi nanti.'
+      setMessage(errorMsg)
     } finally { setLoading(false) }
-  }
-
-  async function handleVerifyOtp() {
-    if (!otp.trim() || otp.trim().length !== 6) { setMessage('Masukkan 6 digit kode.'); return }
-    setLoading(true); setMessage('')
-    try {
-      const res = await api.post('/auth/verify-otp', { email, otp: otp.trim() })
-      const { token, user: laravelUser } = res.data.data || {}
-
-      if (otpContext === 'login') {
-        // Verifikasi OTP setelah login: backend selalu balikin token+user di sini
-        if (!token || !laravelUser) throw new Error('Verifikasi berhasil tapi sesi tidak diterima. Coba login ulang.')
-        localStorage.setItem('token', token)
-        localStorage.setItem('roles', JSON.stringify(laravelUser.roles?.map(r => r.name) || []))
-        window.location.reload()
-      } else {
-        // Verifikasi OTP setelah register: cuma tandai email terverifikasi, minta user login manual
-        setMessage('Email berhasil diverifikasi. Silakan masuk.')
-        setOtp(''); setMode('login')
-      }
-    } catch (err) {
-      setMessage(err.response?.data?.message || err.message || 'Kode salah atau kadaluarsa.')
-    } finally { setLoading(false) }
-  }
-
-  async function handleResendOtp() {
-    if (resendCooldown > 0) return
-    setResending(true); setMessage('')
-    try {
-      await api.post('/auth/resend-otp', { email })
-      setMessage('Kode baru telah dikirim.'); setResendCooldown(60)
-    } catch (err) { setMessage(err.response?.data?.message || 'Gagal mengirim ulang kode.') }
-    finally { setResending(false) }
   }
 
   async function handleForgotPassword() {
     if (!email.trim() || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) { setMessage('Masukkan email yang valid.'); return }
     setLoading(true); setMessage('')
     try {
-      await api.post('/auth/forgot-password', { email })
-      setMessage('Kode pemulihan telah dikirim ke email.'); setMode('reset')
-    } catch (err) { setMessage(err.response?.data?.message || 'Gagal mengirim kode pemulihan.') }
-    finally { setLoading(false) }
-  }
-
-  async function handleResetPassword() {
-    if (!otp.trim() || otp.trim().length !== 6) { setMessage('Masukkan 6 digit kode pemulihan.'); return }
-    if (password.length < 8) { setMessage('Kata sandi baru minimal 8 karakter.'); return }
-    setLoading(true); setMessage('')
-    try {
-      await api.post('/auth/reset-password', { email, otp: otp.trim(), password })
-      setMessage('Password berhasil direset! Silakan login.')
-      setOtp(''); setPassword(''); setMode('login')
-    } catch (err) { setMessage(err.response?.data?.message || 'Gagal mereset password.') }
+      await sendPasswordResetEmail(auth, email)
+      setMessage('Link pemulihan password telah dikirim ke email.')
+    } catch (err) { 
+      let errorMsg = 'Gagal mengirim link pemulihan.'
+      if (err.code === 'auth/user-not-found') errorMsg = 'Email tidak terdaftar.'
+      setMessage(errorMsg)
+    }
     finally { setLoading(false) }
   }
 
@@ -179,33 +124,12 @@ export default function Auth({ onBackToLanding }) {
         <span style={{ fontWeight: 800, fontSize: 20, color: T.text, letterSpacing: '-0.02em' }}>CloudFile</span>
       </motion.div>
 
-      {/* Card */}
       <div style={{ width: '100%', maxWidth: 420, position: 'relative', zIndex: 2 }}>
         <AnimatePresence mode='wait'>
           <motion.div key={mode}
             initial={{ opacity: 0, y: 24, scale: 0.97 }} animate={{ opacity: 1, y: 0, scale: 1 }} exit={{ opacity: 0, y: -16, scale: 0.97 }}
             transition={{ duration: 0.35, ease: [0.22, 1, 0.36, 1] }}
             style={{ background: T.bgCard, borderRadius: 28, padding: isMobile ? 28 : 44, border: `1px solid ${T.border}`, boxShadow: '0 20px 40px rgba(0,0,0,0.05)' }}>
-
-            {/* OTP */}
-            {mode === 'otp' && (
-              <>
-                <h1 style={{ fontWeight: 800, fontSize: 26, color: T.text, margin: '0 0 8px', letterSpacing: '-0.02em' }}>Verifikasi Email</h1>
-                <p style={{ fontSize: 14, color: T.textSub, margin: '0 0 32px', lineHeight: 1.6 }}>
-                  Masukkan 6 digit kode yang dikirim ke <br />
-                  <span style={{ color: T.text, fontWeight: 600 }}>{email}</span>
-                </p>
-                {label('Kode OTP')}
-                {input({ type: 'text', inputMode: 'numeric', maxLength: 6, value: otp, onChange: e => setOtp(e.target.value.replace(/\D/g, '')), onKeyDown: e => e.key === 'Enter' && handleVerifyOtp(), placeholder: '000000', style: { textAlign: 'center', letterSpacing: 12, fontSize: 28, fontWeight: 800 } })}
-                {primaryBtn(handleVerifyOtp, loading ? 'Memverifikasi...' : '✓ Verifikasi')}
-                <p style={{ textAlign: 'center', fontSize: 13, color: T.textMuted }}>
-                  Tidak terima kode?{' '}
-                  <span onClick={handleResendOtp} style={{ color: resendCooldown > 0 ? T.textMuted : T.accent, cursor: resendCooldown > 0 ? 'not-allowed' : 'pointer', fontWeight: 600 }}>
-                    {resending ? 'Mengirim...' : resendCooldown > 0 ? `Kirim ulang (${resendCooldown}s)` : 'Kirim Ulang'}
-                  </span>
-                </p>
-              </>
-            )}
 
             {/* FORGOT */}
             {mode === 'forgot' && (
@@ -218,19 +142,6 @@ export default function Auth({ onBackToLanding }) {
                 <p style={{ textAlign: 'center', fontSize: 13, color: T.textMuted }}>
                   <span onClick={() => { setMode('login'); setMessage('') }} style={{ color: T.accent, cursor: 'pointer', fontWeight: 600 }}>← Kembali ke login</span>
                 </p>
-              </>
-            )}
-
-            {/* RESET */}
-            {mode === 'reset' && (
-              <>
-                <h1 style={{ fontWeight: 800, fontSize: 26, color: T.text, margin: '0 0 8px', letterSpacing: '-0.02em' }}>Reset Password</h1>
-                <p style={{ fontSize: 14, color: T.textSub, margin: '0 0 32px', lineHeight: 1.6 }}>Masukkan kode pemulihan dan password baru.</p>
-                {label('Kode Pemulihan')}
-                {input({ type: 'text', inputMode: 'numeric', maxLength: 6, value: otp, onChange: e => setOtp(e.target.value.replace(/\D/g, '')), placeholder: '000000' })}
-                {label('Password Baru')}
-                {input({ type: showPass ? 'text' : 'password', value: password, onChange: e => setPassword(e.target.value), placeholder: 'Min. 8 karakter' })}
-                {primaryBtn(handleResetPassword, loading ? 'Menyimpan...' : 'Simpan Password Baru')}
               </>
             )}
 
