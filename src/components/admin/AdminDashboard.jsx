@@ -85,7 +85,9 @@ export default function AdminDashboard({ user, onBack }) {
   async function handleBan(userId) {
     if (!window.confirm('Yakin ingin membanned (blokir) pengguna ini secara permanen?')) return
     try {
-      await supabase.from('profiles').update({ status: 'banned' }).eq('id', userId)
+      const { data, error } = await supabase.from('profiles').update({ status: 'banned' }).eq('id', userId).select()
+      if (error) throw error
+      if (!data || data.length === 0) throw new Error('RLS memblokir aksi ini atau user tidak ditemukan')
       await supabase.from('audit_logs').insert([{ user_email: user.email, action: 'Ban User', details: `Banned user ID: ${userId}` }])
       showToast('Pengguna berhasil di-ban! 🚫', 'success')
       fetchData('users')
@@ -95,9 +97,11 @@ export default function AdminDashboard({ user, onBack }) {
   async function handleUnban(userId) {
     if (!window.confirm('Yakin ingin membuka blokir (unban) pengguna ini?')) return
     try {
-      await supabase.from('profiles').update({ status: 'active' }).eq('id', userId)
+      const { data, error } = await supabase.from('profiles').update({ status: 'active', unsuspend_at: null }).eq('id', userId).select()
+      if (error) throw error
+      if (!data || data.length === 0) throw new Error('RLS memblokir aksi ini atau user tidak ditemukan')
       await supabase.from('audit_logs').insert([{ user_email: user.email, action: 'Unban User', details: `Unbanned user ID: ${userId}` }])
-      showToast('Blokir pengguna berhasil dibuka! ✅', 'success')
+      showToast('Ban berhasil dicabut! ✅', 'success')
       fetchData('users')
     } catch (err) { showToast('Gagal unban: ' + err.message, 'error') }
   }
@@ -108,7 +112,9 @@ export default function AdminDashboard({ user, onBack }) {
     setSuspendLoading(true)
     try {
       const unsuspendAt = new Date(Date.now() + suspendHours * 60 * 60 * 1000).toISOString()
-      await supabase.from('profiles').update({ status: 'suspended', unsuspend_at: unsuspendAt }).eq('id', suspendModal.id)
+      const { data, error } = await supabase.from('profiles').update({ status: 'suspended', unsuspend_at: unsuspendAt }).eq('id', suspendModal.id).select()
+      if (error) throw error
+      if (!data || data.length === 0) throw new Error('RLS memblokir aksi ini atau user tidak ditemukan')
       await supabase.from('audit_logs').insert([{ user_email: user.email, action: 'Suspend User', details: `Suspended user ID: ${suspendModal.id} for ${suspendHours} hours` }])
       showToast(`Pengguna disuspend selama ${suspendHours} jam! ⏳`, 'success')
       setSuspendModal(null)
@@ -120,7 +126,9 @@ export default function AdminDashboard({ user, onBack }) {
   async function handleUnsuspend(userId) {
     if (!window.confirm('Yakin ingin membatalkan suspend pengguna ini?')) return
     try {
-      await supabase.from('profiles').update({ status: 'active', unsuspend_at: null }).eq('id', userId)
+      const { data, error } = await supabase.from('profiles').update({ status: 'active', unsuspend_at: null }).eq('id', userId).select()
+      if (error) throw error
+      if (!data || data.length === 0) throw new Error('RLS memblokir aksi ini atau user tidak ditemukan')
       await supabase.from('audit_logs').insert([{ user_email: user.email, action: 'Unsuspend User', details: `Unsuspended user ID: ${userId}` }])
       showToast('Suspend berhasil dibatalkan! ✅', 'success')
       fetchData('users')
@@ -130,7 +138,9 @@ export default function AdminDashboard({ user, onBack }) {
   async function handlePromoteAdmin(userId, userName) {
     if (!window.confirm(`Yakin ingin mempromosikan "${userName}" menjadi Admin?`)) return
     try {
-      await supabase.from('profiles').update({ role: 'ADMIN' }).eq('id', userId)
+      const { data, error } = await supabase.from('profiles').update({ role: 'ADMIN' }).eq('id', userId).select()
+      if (error) throw error
+      if (!data || data.length === 0) throw new Error('RLS memblokir aksi ini atau user tidak ditemukan')
       await supabase.from('audit_logs').insert([{ user_email: user.email, action: 'Promote Admin', details: `Promoted ${userName} to ADMIN` }])
       showToast('Berhasil dijadikan Admin! ⭐', 'success')
       fetchData('users')
@@ -140,7 +150,9 @@ export default function AdminDashboard({ user, onBack }) {
   async function handleDemoteUser(userId, userName) {
     if (!window.confirm(`Yakin ingin mengembalikan peran "${userName}" menjadi User biasa?`)) return
     try {
-      await supabase.from('profiles').update({ role: 'USER' }).eq('id', userId)
+      const { data, error } = await supabase.from('profiles').update({ role: 'USER' }).eq('id', userId).select()
+      if (error) throw error
+      if (!data || data.length === 0) throw new Error('RLS memblokir aksi ini atau user tidak ditemukan')
       showToast('Peran dikembalikan ke User 👤', 'info')
       fetchData('users')
     } catch (err) { showToast('Gagal mengubah peran: ' + err.message, 'error') }
