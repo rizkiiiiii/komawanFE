@@ -20,9 +20,6 @@ export default function AdminDashboard({ user, onBack }) {
   const [files, setFiles] = useState([])
   const [logs, setLogs]   = useState([])
   const [toast, setToast] = useState({ msg:'', type:'success' })
-  const [suspendModal, setSuspendModal] = useState(null)
-  const [suspendHours, setSuspendHours] = useState(1)
-  const [suspendLoading, setSuspendLoading] = useState(false)
   const [showCreateAdmin, setShowCreateAdmin] = useState(false)
   const [adminForm, setAdminForm] = useState({ name: '', email: '', password: '' })
   const [adminLoading, setAdminLoading] = useState(false)
@@ -104,35 +101,6 @@ export default function AdminDashboard({ user, onBack }) {
       showToast('Ban berhasil dicabut! ✅', 'success')
       fetchData('users')
     } catch (err) { showToast('Gagal unban: ' + err.message, 'error') }
-  }
-  function handleOpenSuspendModal(userObj) { setSuspendModal(userObj) }
-
-  async function handleConfirmSuspend(e) {
-    e.preventDefault()
-    setSuspendLoading(true)
-    try {
-      const unsuspendAt = new Date(Date.now() + suspendHours * 60 * 60 * 1000).toISOString()
-      const { data, error } = await supabase.from('profiles').update({ status: 'suspended', unsuspend_at: unsuspendAt }).eq('id', suspendModal.id).select()
-      if (error) throw error
-      if (!data || data.length === 0) throw new Error('RLS memblokir aksi ini atau user tidak ditemukan')
-      await supabase.from('audit_logs').insert([{ user_email: user.email, action: 'Suspend User', details: `Suspended user ID: ${suspendModal.id} for ${suspendHours} hours` }])
-      showToast(`Pengguna disuspend selama ${suspendHours} jam! ⏳`, 'success')
-      setSuspendModal(null)
-      fetchData('users')
-    } catch (err) { showToast('Gagal suspend: ' + err.message, 'error') }
-    setSuspendLoading(false)
-  }
-
-  async function handleUnsuspend(userId) {
-    if (!window.confirm('Yakin ingin membatalkan suspend pengguna ini?')) return
-    try {
-      const { data, error } = await supabase.from('profiles').update({ status: 'active', unsuspend_at: null }).eq('id', userId).select()
-      if (error) throw error
-      if (!data || data.length === 0) throw new Error('RLS memblokir aksi ini atau user tidak ditemukan')
-      await supabase.from('audit_logs').insert([{ user_email: user.email, action: 'Unsuspend User', details: `Unsuspended user ID: ${userId}` }])
-      showToast('Suspend berhasil dibatalkan! ✅', 'success')
-      fetchData('users')
-    } catch (err) { showToast('Gagal unsuspend: ' + err.message, 'error') }
   }
 
   async function handlePromoteAdmin(userId, userName) {
@@ -324,23 +292,17 @@ export default function AdminDashboard({ user, onBack }) {
                             <td style={{padding:'16px 20px'}}>
                               <div style={{display:'flex',alignItems:'center',gap:6}}>
                                 <div style={{width:8,height:8,borderRadius:'50%',
-                                  background:u.status==='active'?T.green:u.status==='suspended'?T.yellow:T.red}}/>
+                                  background:u.status==='active'?T.green:T.red}}/>
                                 <span style={{fontSize:13,fontWeight:600,
-                                  color:u.status==='active'?T.green:u.status==='suspended'?T.yellow:T.red}}>
+                                  color:u.status==='active'?T.green:T.red}}>
                                   {u.status.toUpperCase()}
                                 </span>
                               </div>
-                              {u.status === 'suspended' && u.suspended_until && (
-                                <div style={{fontSize:10,color:T.yellow,marginTop:3}}>
-                                  s/d {new Date(u.suspended_until).toLocaleString('id-ID', { dateStyle: 'short', timeStyle: 'short' })}
-                                </div>
-                              )}
                             </td>
                             <td style={{padding:'16px 20px',textAlign:'right'}}>
                               <div style={{display:'flex',justifyContent:'flex-end',gap:8}}>
                                 {!isSA && (
                                   <>
-                                    {/* Super Admin Role Control Buttons */}
                                     {isSuperAdmin && (
                                       !isA ? (
                                         <motion.button whileHover={{scale:1.05}} whileTap={{scale:0.95}} onClick={() => handlePromoteAdmin(u.id, u.name || u.email)}
@@ -358,18 +320,6 @@ export default function AdminDashboard({ user, onBack }) {
                                         <motion.button whileHover={{scale:1.05}} whileTap={{scale:0.95}} onClick={() => handleUnban(u.id)}
                                           style={{background:T.greenBg,color:T.green,border:`1px solid rgba(59,122,87,0.2)`,padding:'6px 12px',borderRadius:8,cursor:'pointer',fontSize:12,fontWeight:600}}>Unban</motion.button>
                                       )
-                                    )}
-                                    {(!isA || isSuperAdmin) && (
-                                      <>
-                                        {u.status !== 'suspended' && u.status !== 'banned' && (
-                                          <motion.button whileHover={{scale:1.05}} whileTap={{scale:0.95}} onClick={() => handleOpenSuspendModal(u)}
-                                            style={{background:T.yellowBg,color:T.yellow,border:`1px solid rgba(212,163,44,0.2)`,padding:'6px 12px',borderRadius:8,cursor:'pointer',fontSize:12,fontWeight:600}}>Suspend</motion.button>
-                                        )}
-                                        {u.status === 'suspended' && (
-                                          <motion.button whileHover={{scale:1.05}} whileTap={{scale:0.95}} onClick={() => handleUnsuspend(u.id)}
-                                            style={{background:T.greenBg,color:T.green,border:`1px solid rgba(59,122,87,0.2)`,padding:'6px 12px',borderRadius:8,cursor:'pointer',fontSize:12,fontWeight:600}}>Unsuspend</motion.button>
-                                        )}
-                                      </>
                                     )}
                                   </>
                                 )}
@@ -504,62 +454,6 @@ export default function AdminDashboard({ user, onBack }) {
         </div>
       </div>
       
-      {/* MODAL SUSPEND (DURASI 1 - 12 JAM) */}
-      <AnimatePresence>
-        {suspendModal && (
-          <motion.div initial={{opacity:0}} animate={{opacity:1}} exit={{opacity:0}}
-            style={{position:'fixed',inset:0,background:'rgba(0,0,0,0.65)',backdropFilter:'blur(12px)',
-              display:'flex',alignItems:'center',justifyContent:'center',zIndex:2000,padding:20}}
-            onClick={() => setSuspendModal(null)}>
-            <motion.div initial={{scale:0.92,y:15}} animate={{scale:1,y:0}} exit={{scale:0.92,y:15}}
-              onClick={e => e.stopPropagation()}
-              style={{background:T.bgCard,border:`1px solid ${T.borderStrong}`,borderRadius:24,
-                padding:28,width:'100%',maxWidth:400,boxShadow:'0 24px 60px rgba(0,0,0,0.3)'}}>
-              
-              <div style={{display:'flex',alignItems:'center',gap:12,marginBottom:18}}>
-                <div style={{width:44,height:44,borderRadius:14,background:T.yellowBg,
-                  border:`1px solid ${T.yellow}44`,display:'flex',alignItems:'center',
-                  justifyContent:'center',fontSize:22}}>
-                  ⏳
-                </div>
-                <div>
-                  <h3 style={{margin:0,fontSize:17,fontWeight:800,color:T.text}}>Suspend Pengguna</h3>
-                  <p style={{margin:'2px 0 0',fontSize:12,color:T.textMuted,overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap',maxWidth:260}}>
-                    {suspendModal.email}
-                  </p>
-                </div>
-              </div>
-
-              <form onSubmit={handleConfirmSuspend}>
-                <div style={{marginBottom:18}}>
-                  <label style={{display:'block',marginBottom:8,fontSize:12,fontWeight:700,color:T.textSub}}>
-                    Durasi Penangguhan (1 - 12 Jam):
-                  </label>
-                  <input type="number" min="1" max="12" required
-                    value={suspendHours} onChange={e => setSuspendHours(e.target.value)}
-                    style={{width:'100%',boxSizing:'border-box',padding:'12px 14px',borderRadius:12,
-                      background:T.bgSolid,border:`1px solid ${T.borderStrong}`,color:T.text,
-                      fontSize:15,fontWeight:700,outline:'none'}} />
-                </div>
-
-                <div style={{display:'flex',gap:10}}>
-                  <button type="button" onClick={() => setSuspendModal(null)}
-                    style={{flex:1,padding:'12px',borderRadius:12,background:'transparent',
-                      color:T.text,border:`1px solid ${T.border}`,cursor:'pointer',fontSize:13,fontWeight:600}}>
-                    Batal
-                  </button>
-                  <button type="submit" disabled={suspendLoading}
-                    style={{flex:1,padding:'12px',borderRadius:12,background:T.yellowBg,
-                      color:T.yellow,border:`1px solid ${T.yellow}44`,cursor:'pointer',fontSize:13,fontWeight:700}}>
-                    {suspendLoading ? 'Menangguhkan...' : 'Konfirmasi Suspend'}
-                  </button>
-                </div>
-              </form>
-            </motion.div>
-          </motion.div>
-        )}
-      </AnimatePresence>
-
       {/* MODAL CREATE ADMIN BARU */}
       <AnimatePresence>
         {showCreateAdmin && (

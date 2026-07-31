@@ -69,18 +69,7 @@ export default function App() {
             return
           }
 
-          if (profile?.status === 'suspended' && profile.unsuspend_at) {
-            const unsuspendDate = new Date(profile.unsuspend_at)
-            if (new Date() < unsuspendDate) {
-              await auth.signOut()
-              alert(`Akun Anda sedang ditangguhkan (suspend) sampai ${unsuspendDate.toLocaleString()}.`)
-              setUser(null)
-              return
-            } else {
-              // Auto-unsuspend if time has passed
-              await supabase.from('profiles').update({ status: 'active', unsuspend_at: null }).eq('id', firebaseUser.uid)
-            }
-          }
+
 
           let role = 'USER'
           if (profile) {
