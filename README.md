@@ -23,7 +23,7 @@ Ini menghasilkan aplikasi yang jauh lebih cepat, hemat biaya server, dan memilik
 
 3. **Database (Penyimpanan Data Terstruktur)**
    - **Supabase (PostgreSQL)**: Database relasional canggih.
-   - **Tabel `profiles`**: Menyimpan data pengguna (ID Firebase, role, status langganan Pro, status Ban/Suspend).
+   - **Tabel `profiles`**: Menyimpan data pengguna (ID Firebase, role, status langganan Pro, status Ban).
    - **Tabel `audit_logs`**: Mencatat setiap aktivitas pengguna dan admin secara *real-time* (Log Login, Upload, Hapus, Rename, dll).
    - **RPC (Remote Procedure Call)**: Fungsi kustom PostgreSQL (`get_system_stats`, `get_all_storage_objects`) yang berjalan langsung di mesin database untuk komputasi instan statistik aplikasi.
 
@@ -47,8 +47,8 @@ Ini menghasilkan aplikasi yang jauh lebih cepat, hemat biaya server, dan memilik
 - **Dasbor Real-time**: Memonitor total file, total ukuran storage yang terpakai, dan jumlah pengguna secara instan dari Database.
 - **File Explorer Global**: Admin dapat melihat seluruh file yang baru saja diunggah oleh semua pengguna.
 - **Manajemen Pengguna (Hakim Sistem)**:
-  - **Ban**: Blokir akun secara permanen.
-  - **Suspend**: Blokir akun sementara berdasarkan hitungan jam (Sistem *Auto-Unsuspend* akan membuka blokir otomatis ketika waktunya habis).
+  - **Ban & Unban**: Blokir dan buka blokir akun secara permanen (menghalangi/mengizinkan akses masuk ke dalam sistem).
+  - **Role Management**: Bisa mengangkat user biasa menjadi Admin atau menurunkan Admin menjadi user biasa.
 - **Detektif Audit Log**: Semua aktivitas dari seluruh aplikasi terekam jejaknya (Waktu, Email Pelaku, Aksi, dan Detail) dan tidak bisa dihapus oleh pengguna biasa.
 
 ---
